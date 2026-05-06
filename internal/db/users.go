@@ -28,6 +28,25 @@ func GetUser(ctx context.Context, userID int64) (*models.User, error) {
 	return user, nil
 }
 
+// GetUserByUsername retrieves a user by username (without @)
+func GetUserByUsername(ctx context.Context, username string) (*models.User, error) {
+	user := &models.User{}
+	err := Pool.QueryRow(ctx, `
+		SELECT id, username, name, storage_limit_gb, storage_used_bytes,
+		       is_banned, referral_code, referred_by, created_at, last_active
+		FROM users WHERE username = $1
+	`, username).Scan(
+		&user.ID, &user.Username, &user.Name,
+		&user.StorageLimitGB, &user.StorageUsedBytes,
+		&user.IsBanned, &user.ReferralCode, &user.ReferredBy,
+		&user.CreatedAt, &user.LastActive,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return user, nil
+}
+
 func GetOrCreateUser(ctx context.Context, userID int64, username string, name string, referredBy *int64, storageGB int64) (*models.User, error) {
 	user, err := GetUser(ctx, userID)
 	if err == nil {
@@ -180,3 +199,64 @@ func generateReferralCode() (string, error) {
 }
 
 func strPtr(s string) *string { return &s }
+
+// GetNewUsersCount returns users created in the last N days
+func GetNewUsersCount(ctx context.Context, days int) (int, error) {
+	var count int
+	err := Pool.QueryRow(ctx, `
+		SELECT COUNT(*) FROM users
+		WHERE created_at > NOW() - INTERVAL '1 day' * $1
+	`, days).Scan(&count)
+	return count, err
+}
+
+// GetTotalReferralCount returns total number of referrals
+func GetTotalReferralCount(ctx context.Context) (int, error) {
+	var count int
+	err := Pool.QueryRow(ctx, "SELECT COUNT(*) FROM referrals").Scan(&count)
+	return count, err
+}
+
+// GetTopStorageUser returns the user using the most storage
+func GetTopStorageUser(ctx context.Context) *models.User {
+	row := Pool.QueryRow(ctx, `
+		SELECT id, username, name, storage_limit_gb, storage_used_bytes,
+		       is_banned, referral_code, referred_by, created_at, last_active
+		FROM users ORDER BY storage_used_bytes DESC LIMIT 1
+	`)
+	user := &models.User{}
+	err := row.Scan(
+		&user.ID, &user.Username, &user.Name,
+		&user.StorageLimitGB, &user.StorageUsedBytes,
+		&user.IsBanned, &user.ReferralCode, &user.ReferredBy,
+		&user.CreatedAt, &user.LastActive)
+	if err != nil {
+		return nil
+	}
+	return user
+}
+
+// UpdateUserStorageLimit sets a user's storage limit directly
+func UpdateUserStorageLimit(ctx context.Context, userID int64, limitGB int64) error {
+	_, err := Pool.Exec(ctx, `
+		UPDATE users SET storage_limit_gb = $2, last_active = NOW()
+		WHERE id = $1
+	`, userID, limitGB)
+	return err
+}
+
+// GetUserFilesCount returns total file count for a user
+func GetUserFilesCount(ctx context.Context, userID int64) (int, error) {
+	var count int
+	err := Pool.QueryRow(ctx, `
+		SELECT COUNT(*) FROM files WHERE user_id = $1
+	`, userID).Scan(&count)
+	return count, err
+}
+
+// GetBannedCount returns the total number of banned users
+func GetBannedCount(ctx context.Context) (int, error) {
+	var count int
+	err := Pool.QueryRow(ctx, "SELECT COUNT(*) FROM users WHERE is_banned = true").Scan(&count)
+	return count, err
+}

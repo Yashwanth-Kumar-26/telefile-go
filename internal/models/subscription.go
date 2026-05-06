@@ -2,18 +2,20 @@ package models
 
 import (
 	"encoding/json"
+	"fmt"
 	"time"
 )
 
 // Subscription represents a subscription plan
 type Subscription struct {
-	ID        int             `json:"id"`
-	Name      string          `json:"name"`
-	StorageGB int             `json:"storage_gb"`
-	PriceINR  float64         `json:"price_inr"`
-	Features  json.RawMessage `json:"features"`
-	IsActive  bool            `json:"is_active"`
-	CreatedAt time.Time       `json:"created_at"`
+	ID           int             `json:"id"`
+	Name         string          `json:"name"`
+	StorageGB    int             `json:"storage_gb"`
+	PriceINR     float64         `json:"price_inr"`
+	Features     json.RawMessage `json:"features"`
+	IsActive     bool            `json:"is_active"`
+	DurationDays int64           `json:"duration_days"`
+	CreatedAt    time.Time       `json:"created_at"`
 }
 
 // MaxFileSize returns the max file size in MB from features
@@ -51,12 +53,8 @@ func (s *Subscription) StorageLabel() string {
 	if s.StorageGB == -1 {
 		return "Unlimited"
 	}
-	return formatStorageGB(s.StorageGB)
-}
-
-func formatStorageGB(gb int) string {
-	if gb >= 1024 {
-		return string(rune('0'+gb/1024)) + " TB"
+	if s.StorageGB >= 1024 {
+		return fmt.Sprintf("%d TB", s.StorageGB/1024)
 	}
-	return string(rune('0' + gb/1)) + " GB"
+	return fmt.Sprintf("%d GB", s.StorageGB)
 }

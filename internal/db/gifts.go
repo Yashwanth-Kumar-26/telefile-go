@@ -115,6 +115,12 @@ func GetGiftCodesByUser(ctx context.Context, userID int64) ([]*models.GiftCode, 
 	return gifts, nil
 }
 
+// DeleteGiftCode deletes a gift code by code
+func DeleteGiftCode(ctx context.Context, code string) error {
+	_, err := Pool.Exec(ctx, "DELETE FROM gift_codes WHERE code = $1", code)
+	return err
+}
+
 // GetAllGiftCodes retrieves all gift codes (admin)
 func GetAllGiftCodes(ctx context.Context) ([]*models.GiftCode, error) {
 	rows, err := Pool.Query(ctx, `

@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"fmt"
+	"log"
 	"strings"
 
 	"github.com/Yashwanth-Kumar-26/telefile/internal/db"
@@ -12,8 +13,16 @@ import (
 
 // Start handles the /start command
 func Start(ctx *bot.Context) error {
+	updateType := "unknown"
+	if ctx.CallbackQuery != nil {
+		updateType = "callback"
+	} else if ctx.Message != nil {
+		updateType = "message"
+	}
+	log.Printf("[DEBUG] Start called - Type: %s, Text: %q", updateType, ctx.Text())
 
 	param := parseStartParam(ctx.Text())
+	log.Printf("[DEBUG] Start param: %q", param)
 
 	// Handle file download link
 	if strings.HasPrefix(param, "file_") {
@@ -50,7 +59,13 @@ func Start(ctx *bot.Context) error {
 		},
 	)
 
-	_, _ = ctx.Reply(welcomeMsg, bot.WithParseMode("Markdown"), bot.WithReplyMarkup(markup))
+	if ctx.CallbackQuery != nil {
+		log.Printf("[DEBUG] Start - using EditMessageText")
+		_, _ = ctx.EditMessageText(welcomeMsg, bot.WithNewParseMode("Markdown"), bot.WithNewReplyMarkup(markup))
+	} else {
+		log.Printf("[DEBUG] Start - using Reply")
+		_, _ = ctx.Reply(welcomeMsg, bot.WithParseMode("Markdown"), bot.WithReplyMarkup(markup))
+	}
 	return nil
 }
 

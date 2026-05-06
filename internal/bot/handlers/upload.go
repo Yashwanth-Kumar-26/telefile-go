@@ -24,11 +24,13 @@ type FileInfo struct {
 }
 
 type UploadState struct {
-	Files        []FileInfo
-	BatchMode    bool
-	Password     string
-	ExpiresIn    time.Duration
-	ControlMsgID int64
+	Files         []FileInfo
+	BatchMode     bool
+	Password      string
+	ExpiresIn     time.Duration
+	MaxDownloads  int // -1 = unlimited, 0 = not set yet
+	ControlMsgID  int64
+	AskPhase      string // "expiry" | "password" | "downloads"
 }
 
 var PendingUploads = make(map[int64]*UploadState)
@@ -50,7 +52,7 @@ func HandleUpload(ctx *bot.Context, cfg *config.Config) error {
 
 	state, ok := PendingUploads[senderID]
 	if !ok {
-		state = &UploadState{Files: []FileInfo{}}
+		state = &UploadState{Files: []FileInfo{}, AskPhase: "expiry"}
 		PendingUploads[senderID] = state
 	}
 

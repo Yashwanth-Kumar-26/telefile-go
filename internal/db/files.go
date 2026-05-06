@@ -143,6 +143,15 @@ func GetFileCount(ctx context.Context) (int, error) {
 	return count, err
 }
 
+// GetDailyUploads returns file count created in the last 24 hours
+func GetDailyUploads(ctx context.Context) (int, error) {
+	var count int
+	err := Pool.QueryRow(ctx, `
+		SELECT COUNT(*) FROM files WHERE created_at > NOW() - INTERVAL '1 day'
+	`).Scan(&count)
+	return count, err
+}
+
 // GetUserFileCount returns file count for a specific user
 func GetUserFileCount(ctx context.Context, userID int64) (int, error) {
 	var count int

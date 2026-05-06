@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -62,6 +63,16 @@ func main() {
 	b.Router.OnCallback("help", handlers.Help)
 	b.Router.OnCallback("myfiles", handlers.MyFiles)
 	b.Router.OnCallback("plans", handlers.ShowPlans)
+	b.Router.OnCallback("buy_plan", handlers.ShowBuyPlanMenu)
+	b.Router.OnCallback("bp_select_", func(ctx *bot.Context) error {
+		id, err := strconv.Atoi(parseDynamicSuffix(ctx, "bp_select_"))
+		if err != nil {
+			return nil
+		}
+		return handlers.BuyPlanSelect(ctx, id)
+	})
+	b.Router.OnCallback("bp_upi", handlers.ShowUPIQR)
+	b.Router.OnCallback("bp_cancel", handlers.BuyPlanHandleCancel)
 	b.Router.OnCallback("my_stats", handlers.ShowStats)
 	b.Router.OnCallback("referral", func(ctx *bot.Context) error {
 		return handlers.ShowReferral(ctx, cfg)
@@ -108,6 +119,10 @@ func main() {
 
 		// Handle file upload
 		if ctx.Message.Document != nil || ctx.Message.Photo != nil {
+			sid := ctx.SenderID()
+			if adminhandlers.AdminFSM.HasState(sid, adminhandlers.StateBuyPlanUpload) {
+				return handlers.BuyPlanHandlePhoto(ctx)
+			}
 			return handlers.HandleUpload(ctx, cfg)
 		}
 
@@ -134,14 +149,49 @@ func main() {
 			return handlers.HandleReport(ctx)
 		}
 
-		// Handle admin user lookup input
-		if _, ok := adminhandlers.UserStates[ctx.SenderID()]; ok {
-			return adminhandlers.AdminUserLookup(ctx)
+		// Handle admin FSM text inputs
+		sid := ctx.SenderID()
+		if adminhandlers.AdminFSM.HasState(sid, adminhandlers.StateLookupUser) {
+			return adminhandlers.AdmLookupDo(ctx)
 		}
-
-		// Handle broadcast input
-		if _, ok := adminhandlers.BroadcastStates[ctx.SenderID()]; ok {
-			return adminhandlers.HandleBroadcast(ctx)
+		if adminhandlers.AdminFSM.HasState(sid, adminhandlers.StateBanUser) {
+			return adminhandlers.AdmBanDo(ctx)
+		}
+		if adminhandlers.AdminFSM.HasState(sid, adminhandlers.StateUnbanUser) {
+			return adminhandlers.AdmUnbanDo(ctx)
+		}
+		if adminhandlers.AdminFSM.HasState(sid, adminhandlers.StateSetStorage) {
+			return adminhandlers.AdmSetStorageDo(ctx)
+		}
+		if adminhandlers.AdminFSM.HasState(sid, adminhandlers.StateAddBonus) {
+			return adminhandlers.AdmAddBonusDo(ctx)
+		}
+		if adminhandlers.AdminFSM.HasState(sid, adminhandlers.StateBroadcast) {
+			return adminhandlers.AdmBroadcastSend(ctx)
+		}
+		if adminhandlers.AdminFSM.HasState(sid, adminhandlers.StateCreatePlanName) {
+			return adminhandlers.AdmCreatePlanName(ctx)
+		}
+		if adminhandlers.AdminFSM.HasState(sid, adminhandlers.StateCreatePlanPrice) {
+			return adminhandlers.AdmCreatePlanPrice(ctx)
+		}
+		if adminhandlers.AdminFSM.HasState(sid, adminhandlers.StateCreatePlanStorage) {
+			return adminhandlers.AdmCreatePlanStorage(ctx)
+		}
+		if adminhandlers.AdminFSM.HasState(sid, adminhandlers.StateCreatePlanDays) {
+			return adminhandlers.AdmCreatePlanDays(ctx)
+		}
+		if adminhandlers.AdminFSM.HasState(sid, adminhandlers.StateCreatePlanDesc) {
+			return adminhandlers.AdmCreatePlanDesc(ctx)
+		}
+		if adminhandlers.AdminFSM.HasState(sid, adminhandlers.StateCreateGift) {
+			return adminhandlers.AdmCreateGiftDo(ctx)
+		}
+		if adminhandlers.AdminFSM.HasState(sid, adminhandlers.StateCreateGiftExpiry) {
+			return adminhandlers.AdmCreateGiftExpiry(ctx)
+		}
+		if adminhandlers.AdminFSM.HasState(sid, adminhandlers.StateCreateGiftClaims) {
+			return adminhandlers.AdmCreateGiftClaims(ctx)
 		}
 
 		return nil
@@ -156,41 +206,141 @@ func main() {
 
 	// Admin commands
 	adminBot.Router.On("/admin", adminhandlers.AdminPanel)
-	adminBot.Router.On("/stats", adminhandlers.AdminStats)
+	adminBot.Router.On("/stats", adminhandlers.AdmStats)
+	adminBot.Router.On("/cancel", adminhandlers.AdminCancel)
 
-	// Admin callbacks
+	// Admin panel main callback
 	adminBot.Router.OnCallback("admin_panel", adminhandlers.AdminPanel)
-	adminBot.Router.OnCallback("admin_stats", adminhandlers.AdminStats)
-	adminBot.Router.OnCallback("admin_users", adminhandlers.AdminUsers)
-	adminBot.Router.OnCallback("admin_gifts", adminhandlers.ShowGifts)
-	adminBot.Router.OnCallback("admin_broadcast", adminhandlers.StartBroadcast)
-	adminBot.Router.OnCallback("admin_cleanup", adminhandlers.AdminCleanup)
 
-	// Gift creation callbacks
-	adminBot.Router.OnCallback("admin_gift_create", adminhandlers.StartGiftCreate)
-	adminBot.Router.OnCallback("admin_gift_10gb", func(ctx *bot.Context) error {
-		return adminhandlers.HandleGiftStorage(ctx, 10)
+	// Stats
+	adminBot.Router.OnCallback("adm_stats", adminhandlers.AdmStats)
+
+	// User management
+	adminBot.Router.OnCallback("adm_lookup", adminhandlers.AdmLookupPrompt)
+	adminBot.Router.OnCallback("adm_ban", adminhandlers.AdmBanPrompt)
+	adminBot.Router.OnCallback("adm_unban", adminhandlers.AdmUnbanPrompt)
+	adminBot.Router.OnCallback("adm_set_storage", adminhandlers.AdmSetStoragePrompt)
+	adminBot.Router.OnCallback("adm_add_bonus", adminhandlers.AdmAddBonusGeneral)
+	adminBot.Router.OnCallback("adm_setstg_", func(ctx *bot.Context) error {
+		uid, err := strconv.ParseInt(parseDynamicSuffix(ctx, "adm_setstg_"), 10, 64)
+		if err != nil {
+			return nil
+		}
+		return adminhandlers.AdmSetStorageForUser(ctx, uid)
 	})
-	adminBot.Router.OnCallback("admin_gift_50gb", func(ctx *bot.Context) error {
-		return adminhandlers.HandleGiftStorage(ctx, 50)
+	adminBot.Router.OnCallback("adm_addbonus_", func(ctx *bot.Context) error {
+		uid, err := strconv.ParseInt(parseDynamicSuffix(ctx, "adm_addbonus_"), 10, 64)
+		if err != nil {
+			return nil
+		}
+		return adminhandlers.AdmAddBonusPrompt(ctx, uid)
 	})
-	adminBot.Router.OnCallback("admin_gift_100gb", func(ctx *bot.Context) error {
-		return adminhandlers.HandleGiftStorage(ctx, 100)
+	adminBot.Router.OnCallback("adm_ban_do_", func(ctx *bot.Context) error {
+		uid, err := strconv.ParseInt(parseDynamicSuffix(ctx, "adm_ban_do_"), 10, 64)
+		if err != nil {
+			return nil
+		}
+		return adminhandlers.AdmBanDoByID(ctx, uid)
 	})
-	adminBot.Router.OnCallback("admin_gift_500gb", func(ctx *bot.Context) error {
-		return adminhandlers.HandleGiftStorage(ctx, 500)
+	adminBot.Router.OnCallback("adm_unban_do_", func(ctx *bot.Context) error {
+		uid, err := strconv.ParseInt(parseDynamicSuffix(ctx, "adm_unban_do_"), 10, 64)
+		if err != nil {
+			return nil
+		}
+		return adminhandlers.AdmUnbanDoByID(ctx, uid)
 	})
-	adminBot.Router.OnCallback("admin_gift_claims_1", func(ctx *bot.Context) error {
-		return adminhandlers.HandleGiftClaims(ctx, 1)
+
+	// Plans
+	adminBot.Router.OnCallback("adm_plans", adminhandlers.AdmPlans)
+	adminBot.Router.OnCallback("adm_create_plan", adminhandlers.AdmCreatePlanStart)
+	adminBot.Router.OnCallback("adm_delplan_", func(ctx *bot.Context) error {
+		id, err := strconv.Atoi(parseDynamicSuffix(ctx, "adm_delplan_"))
+		if err != nil {
+			return nil
+		}
+		return adminhandlers.AdmDelPlan(ctx, id)
 	})
-	adminBot.Router.OnCallback("admin_gift_claims_10", func(ctx *bot.Context) error {
-		return adminhandlers.HandleGiftClaims(ctx, 10)
+
+	// Pending Payments
+	adminBot.Router.OnCallback("adm_payments", adminhandlers.AdmPayments)
+	adminBot.Router.OnCallback("adm_pay_detail_", func(ctx *bot.Context) error {
+		id, err := strconv.Atoi(parseDynamicSuffix(ctx, "adm_pay_detail_"))
+		if err != nil {
+			return nil
+		}
+		return adminhandlers.AdmPayDetail(ctx, id)
 	})
-	adminBot.Router.OnCallback("admin_gift_claims_100", func(ctx *bot.Context) error {
-		return adminhandlers.HandleGiftClaims(ctx, 100)
+	adminBot.Router.OnCallback("pay_approve_", func(ctx *bot.Context) error {
+		id, err := strconv.Atoi(parseDynamicSuffix(ctx, "pay_approve_"))
+		if err != nil {
+			return nil
+		}
+		return adminhandlers.AdmPayApprove(ctx, id)
 	})
-	adminBot.Router.OnCallback("admin_gift_claims_unlimited", func(ctx *bot.Context) error {
-		return adminhandlers.HandleGiftClaims(ctx, -1)
+	adminBot.Router.OnCallback("pay_reject_", func(ctx *bot.Context) error {
+		id, err := strconv.Atoi(parseDynamicSuffix(ctx, "pay_reject_"))
+		if err != nil {
+			return nil
+		}
+		return adminhandlers.AdmPayReject(ctx, id)
+	})
+
+	// Gifts
+	adminBot.Router.OnCallback("adm_gifts", adminhandlers.AdmGifts)
+	adminBot.Router.OnCallback("adm_create_gift", adminhandlers.AdmCreateGiftPrompt)
+
+	// Broadcast
+	adminBot.Router.OnCallback("adm_broadcast", adminhandlers.AdmBroadcastPrompt)
+
+	// Cleanup
+	adminBot.Router.OnCallback("adm_cleanup", adminhandlers.AdmCleanup)
+
+	// Default handler — routes FSM text inputs for admin flows
+	adminBot.Router.Default(func(ctx *bot.Context) error {
+		sid := ctx.SenderID()
+		if adminhandlers.AdminFSM.HasState(sid, adminhandlers.StateLookupUser) {
+			return adminhandlers.AdmLookupDo(ctx)
+		}
+		if adminhandlers.AdminFSM.HasState(sid, adminhandlers.StateBanUser) {
+			return adminhandlers.AdmBanDo(ctx)
+		}
+		if adminhandlers.AdminFSM.HasState(sid, adminhandlers.StateUnbanUser) {
+			return adminhandlers.AdmUnbanDo(ctx)
+		}
+		if adminhandlers.AdminFSM.HasState(sid, adminhandlers.StateSetStorage) {
+			return adminhandlers.AdmSetStorageDo(ctx)
+		}
+		if adminhandlers.AdminFSM.HasState(sid, adminhandlers.StateAddBonus) {
+			return adminhandlers.AdmAddBonusDo(ctx)
+		}
+		if adminhandlers.AdminFSM.HasState(sid, adminhandlers.StateBroadcast) {
+			return adminhandlers.AdmBroadcastSend(ctx)
+		}
+		if adminhandlers.AdminFSM.HasState(sid, adminhandlers.StateCreatePlanName) {
+			return adminhandlers.AdmCreatePlanName(ctx)
+		}
+		if adminhandlers.AdminFSM.HasState(sid, adminhandlers.StateCreatePlanPrice) {
+			return adminhandlers.AdmCreatePlanPrice(ctx)
+		}
+		if adminhandlers.AdminFSM.HasState(sid, adminhandlers.StateCreatePlanStorage) {
+			return adminhandlers.AdmCreatePlanStorage(ctx)
+		}
+		if adminhandlers.AdminFSM.HasState(sid, adminhandlers.StateCreatePlanDays) {
+			return adminhandlers.AdmCreatePlanDays(ctx)
+		}
+		if adminhandlers.AdminFSM.HasState(sid, adminhandlers.StateCreatePlanDesc) {
+			return adminhandlers.AdmCreatePlanDesc(ctx)
+		}
+		if adminhandlers.AdminFSM.HasState(sid, adminhandlers.StateCreateGift) {
+			return adminhandlers.AdmCreateGiftDo(ctx)
+		}
+		if adminhandlers.AdminFSM.HasState(sid, adminhandlers.StateCreateGiftExpiry) {
+			return adminhandlers.AdmCreateGiftExpiry(ctx)
+		}
+		if adminhandlers.AdminFSM.HasState(sid, adminhandlers.StateCreateGiftClaims) {
+			return adminhandlers.AdmCreateGiftClaims(ctx)
+		}
+		return nil
 	})
 
 	// Start scheduler
@@ -243,6 +393,39 @@ func main() {
 	<-quit
 
 	log.Println("Shutting down...")
+}
+
+// parseDynamicSuffix extracts the suffix after a prefix from the callback data.
+// e.g. parseDynamicSuffix(ctx, "admin_ban_") with callback "admin_ban_12345" returns "12345".
+func parseDynamicSuffix(ctx *bot.Context, prefix string) string {
+	data := ""
+	if ctx.CallbackQuery != nil && ctx.CallbackQuery.Data != "" {
+		data = ctx.CallbackQuery.Data
+	} else if ctx.Update.CallbackQuery != nil {
+		data = ctx.Update.CallbackQuery.Data
+	}
+	if len(data) > len(prefix) && data[:len(prefix)] == prefix {
+		return data[len(prefix):]
+	}
+	return ""
+}
+
+// parseDynamicParts splits the suffix of a callback by a delimiter.
+// e.g. parseDynamicParts(ctx, "admin_usr_files_", "_") with "admin_usr_files_123_2"
+// returns ["123", "2"].
+func parseDynamicParts(ctx *bot.Context, prefix string, sep string) []string {
+	suffix := parseDynamicSuffix(ctx, prefix)
+	if suffix == "" {
+		return nil
+	}
+	parts := strings.Split(suffix, sep)
+	var filtered []string
+	for _, p := range parts {
+		if p != "" {
+			filtered = append(filtered, p)
+		}
+	}
+	return filtered
 }
 
 // processBotUpdate manually routes the update to the appropriate handler.
