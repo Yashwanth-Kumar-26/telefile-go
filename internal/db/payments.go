@@ -2,12 +2,17 @@ package db
 
 import (
 	"context"
+	"fmt"
 	"log"
+
+	"github.com/Yashwanth-Kumar-26/telefile/internal/bot/instance"
+	"github.com/Yashwanth-Kumar-26/teleriha/pkg/bot"
 )
 
 type PendingPayment struct {
 	ID               int     `json:"id"`
 	UserID           int64   `json:"user_id"`
+	PlanID           int     `json:"plan_id"`
 	PlanName         string  `json:"plan_name"`
 	FirstName        string  `json:"first_name"`
 	Amount           float64 `json:"amount"`
@@ -26,7 +31,7 @@ func GetPendingPaymentCount(ctx context.Context) (int, error) {
 
 func GetPendingPayments(ctx context.Context) ([]*PendingPayment, error) {
 	rows, err := Pool.Query(ctx, `
-		SELECT id, user_id, plan_name, COALESCE(first_name, 'User'), COALESCE(amount, 0),
+		SELECT id, user_id, plan_id, plan_name, COALESCE(first_name, 'User'), COALESCE(amount, 0),
 		       COALESCE(screenshot_file_id, ''), COALESCE(created_at::text, '')
 		FROM pending_payments ORDER BY created_at DESC LIMIT 50
 	`)
@@ -38,7 +43,7 @@ func GetPendingPayments(ctx context.Context) ([]*PendingPayment, error) {
 	var payments []*PendingPayment
 	for rows.Next() {
 		p := &PendingPayment{}
-		if err := rows.Scan(&p.ID, &p.UserID, &p.PlanName, &p.FirstName, &p.Amount, &p.ScreenshotFileID, &p.CreatedAt); err != nil {
+		if err := rows.Scan(&p.ID, &p.UserID, &p.PlanID, &p.PlanName, &p.FirstName, &p.Amount, &p.ScreenshotFileID, &p.CreatedAt); err != nil {
 			continue
 		}
 		payments = append(payments, p)
@@ -49,7 +54,7 @@ func GetPendingPayments(ctx context.Context) ([]*PendingPayment, error) {
 func GetPayment(ctx context.Context, paymentID int) (*PendingPayment, error) {
 	p := &PendingPayment{}
 	err := Pool.QueryRow(ctx, `
-		SELECT id, user_id, plan_name, COALESCE(first_name, 'User'), COALESCE(amount, 0),
+		SELECT id, user_id, plan_id, plan_name, COALESCE(first_name, 'User'), COALESCE(amount, 0),
 		       COALESCE(screenshot_file_id, ''), COALESCE(created_at::text, '')
 		FROM pending_payments WHERE id = $1
 	`, paymentID).Scan(&p.ID, &p.UserID, &p.PlanName, &p.FirstName, &p.Amount, &p.ScreenshotFileID, &p.CreatedAt)
@@ -66,10 +71,9 @@ func ApprovePayment(ctx context.Context, paymentID int) error {
 		return err
 	}
 
-	plan, err := GetSubscription(ctx, payment.PlanName)
+	plan, err := GetSubscriptionByID(ctx, payment.PlanID)
 	if err != nil || plan == nil {
-		log.Printf("[PAYMENT] Plan not found: %s", payment.PlanName)
-		_, _ = Pool.Exec(ctx, "DELETE FROM pending_payments WHERE id = $1", paymentID)
+		log.Printf("[PAYMENT] Plan not found: plan_id=%d", payment.PlanID)
 		return err
 	}
 
@@ -83,6 +87,12 @@ func ApprovePayment(ctx context.Context, paymentID int) error {
 		return err
 	}
 
+	// Notify user of approval
+	if instance.MainBot != nil {
+		msg := fmt.Sprintf("Payment Approved!\n\nPlan: %s\nStorage: %s\n\nYour plan has been activated.", payment.PlanName, plan.StorageLabel())
+		_, _ = instance.MainBot.SendMessage(payment.UserID, msg, bot.WithParseMode("Markdown"))
+	}
+
 	// Delete pending payment
 	_, err = Pool.Exec(ctx, "DELETE FROM pending_payments WHERE id = $1", paymentID)
 	if err != nil {
@@ -92,6 +102,17 @@ func ApprovePayment(ctx context.Context, paymentID int) error {
 }
 
 func RejectPayment(ctx context.Context, paymentID int) error {
-	_, err := Pool.Exec(ctx, "DELETE FROM pending_payments WHERE id = $1", paymentID)
-	return err
+	payment, err := GetPayment(ctx, paymentID)
+	if err != nil {
+		return err
+	}
+	_, err = Pool.Exec(ctx, "DELETE FROM pending_payments WHERE id = $1", paymentID)
+	if err != nil {
+		return err
+	}
+	if instance.MainBot != nil {
+		msg := fmt.Sprintf("Payment Rejected.\n\nPlan: %s\nAmount: ₹%.0f\n\nPlease contact support or re-submit with correct payment.", payment.PlanName, payment.Amount)
+		_, _ = instance.MainBot.SendMessage(payment.UserID, msg, bot.WithParseMode("Markdown"))
+	}
+	return nil
 }

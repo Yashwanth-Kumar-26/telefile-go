@@ -26,7 +26,7 @@ func BanCheck() func(bot.Handler) bot.Handler {
 			}
 
 			if user.IsBanned {
-				_, _ = ctx.Reply("\xe2\x9b\x94 Your account has been suspended. Contact support.")
+				_, _ = ctx.Reply("Your account has been suspended. Contact support.")
 				return nil
 			}
 

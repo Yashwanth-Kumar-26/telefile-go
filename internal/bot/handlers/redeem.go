@@ -43,8 +43,7 @@ func HandleRedeemCode(ctx *bot.Context) error {
 		_, _ = ctx.Reply(fmt.Sprintf("Failed to claim: %v", err))
 		return nil
 	}
-
-	_ = db.UpdateUserLimit(context.Background(), senderID, int64(gift.StorageGB))
+	// ClaimGiftCode already adds storage to user limit (gifts.go:78-84)
 
 	_, _ = ctx.Reply(fmt.Sprintf("Gift Code Redeemed! + %d GB of storage added to your account!", gift.StorageGB), bot.WithParseMode("Markdown"))
 	return nil

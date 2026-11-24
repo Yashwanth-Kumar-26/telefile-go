@@ -107,9 +107,11 @@ func HandleDownloadPassword(ctx *bot.Context) error {
 			return nil
 		}
 		if files[0].Password == nil || *files[0].Password != password {
+			deletePasswordMessage(ctx)
 			_, _ = ctx.Reply("Incorrect password. Please try again:")
 			return nil
 		}
+		deletePasswordMessage(ctx)
 		delete(DownloadStates, senderID)
 		for _, f := range files {
 			_ = sendFile(ctx, f)
@@ -125,12 +127,20 @@ func HandleDownloadPassword(ctx *bot.Context) error {
 	}
 
 	if file.Password == nil || *file.Password != password {
+		deletePasswordMessage(ctx)
 		_, _ = ctx.Reply("Incorrect password. Please try again:")
 		return nil
 	}
 
+	deletePasswordMessage(ctx)
 	delete(DownloadStates, senderID)
 	return sendFile(ctx, file)
+}
+
+func deletePasswordMessage(ctx *bot.Context) {
+	if ctx.Message != nil {
+		_ = ctx.Bot.DeleteMessage(ctx.ChatID(), ctx.Message.MessageID)
+	}
 }
 
 func CancelDownload(ctx *bot.Context) error {

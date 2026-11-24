@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -55,13 +56,30 @@ func main() {
 		_ = handlers.CancelUpload(ctx)
 		_ = handlers.CancelRedeem(ctx)
 		_ = handlers.CancelDownload(ctx)
+		_ = handlers.CancelReport(ctx)
+		delete(handlers.BuyPlanStates, ctx.SenderID())
+		adminhandlers.AdminFSM.End(ctx.SenderID())
 		return nil
+	})
+
+	// Cancel confirm handlers
+	b.Router.OnCallback("cancel_confirm", func(ctx *bot.Context) error {
+		sid := ctx.SenderID()
+		delete(handlers.PendingUploads, sid)
+		delete(handlers.DownloadStates, sid)
+		delete(handlers.RedeemStates, sid)
+		delete(handlers.ReportStates, sid)
+		delete(handlers.BuyPlanStates, sid)
+		return handlers.Start(ctx)
+	})
+	b.Router.OnCallback("cancel_deny", func(ctx *bot.Context) error {
+		return handlers.Start(ctx)
 	})
 
 	// Handle callbacks
 	b.Router.OnCallback("start", handlers.Start)
 	b.Router.OnCallback("help", handlers.Help)
-	b.Router.OnCallback("myfiles", handlers.MyFiles)
+	b.Router.OnCallback("myfiles_menu", handlers.MyFiles)
 	b.Router.OnCallback("plans", handlers.ShowPlans)
 	b.Router.OnCallback("buy_plan", handlers.ShowBuyPlanMenu)
 	b.Router.OnCallback("bp_select_", func(ctx *bot.Context) error {
@@ -77,15 +95,33 @@ func main() {
 	b.Router.OnCallback("referral", func(ctx *bot.Context) error {
 		return handlers.ShowReferral(ctx, cfg)
 	})
+	b.Router.OnCallback("copy_referral", func(ctx *bot.Context) error {
+		_ = ctx.AnswerCallback("", false)
+		link := fmt.Sprintf("https://t.me/%s?start=ref_%d", cfg.BotUsername, ctx.SenderID())
+		_, _ = ctx.Reply("Your referral link:\n" + link)
+		return nil
+	})
 	b.Router.OnCallback("redeem", handlers.StartRedeem)
 	b.Router.OnCallback("report", handlers.StartReport)
-	b.Router.OnCallback("upload_batch", handlers.StartBatch)
-	b.Router.OnCallback("upload_batch_start", handlers.StartBatch)
+	b.Router.OnCallback("upload_batch_activate", handlers.StartBatch)
 	b.Router.OnCallback("upload_batch_done", func(ctx *bot.Context) error {
-		return handlers.UploadPasswordNo(ctx) // Skip to expiry/finish
+		// Show password prompt before expiry selection
+		senderID := ctx.SenderID()
+		state, ok := handlers.PendingUploads[senderID]
+		if ok && state != nil && state.Password == "" {
+			markup := bot.NewInlineKeyboard(
+				[]bot.InlineKeyboardButton{
+					bot.InlineButton("Yes", "upload_pwd_yes"),
+					bot.InlineButton("No", "upload_pwd_no"),
+				},
+			)
+			_, _ = ctx.EditMessageText("Do you want to set a password?", bot.WithNewParseMode("Markdown"), bot.WithNewReplyMarkup(markup))
+			return nil
+		}
+		return handlers.UploadPasswordNo(ctx)
 	})
 	b.Router.OnCallback("upload_help", func(ctx *bot.Context) error {
-		_, err := ctx.Reply("📤 Send any file to upload it!")
+		_, err := ctx.Reply("Send any file to upload it! 📤")
 		return err
 	})
 	b.Router.OnCallback("upload_cancel", handlers.CancelUpload)
@@ -93,6 +129,10 @@ func main() {
 	// Upload password callbacks
 	b.Router.OnCallback("upload_pwd_yes", handlers.UploadPasswordYes)
 	b.Router.OnCallback("upload_pwd_no", handlers.UploadPasswordNo)
+	b.Router.OnCallback("myfiles_", func(ctx *bot.Context) error {
+		pageStr := parseDynamicSuffix(ctx, "myfiles_")
+		return handlers.HandleMyFilesPage(ctx, pageStr)
+	})
 
 	// Upload expiry callbacks
 	b.Router.OnCallback("upload_exp_1h", func(ctx *bot.Context) error {
@@ -118,7 +158,7 @@ func main() {
 		}
 
 		// Handle file upload
-		if ctx.Message.Document != nil || ctx.Message.Photo != nil {
+		if ctx.Message.Document != nil || ctx.Message.Photo != nil || ctx.Message.Video != nil || ctx.Message.Audio != nil || ctx.Message.Voice != nil || ctx.Message.Animation != nil {
 			sid := ctx.SenderID()
 			if adminhandlers.AdminFSM.HasState(sid, adminhandlers.StateBuyPlanUpload) {
 				return handlers.BuyPlanHandlePhoto(ctx)
@@ -193,6 +233,9 @@ func main() {
 		if adminhandlers.AdminFSM.HasState(sid, adminhandlers.StateCreateGiftClaims) {
 			return adminhandlers.AdmCreateGiftClaims(ctx)
 		}
+		if adminhandlers.AdminFSM.HasState(sid, adminhandlers.StateBuyPlanUpload) {
+			return handlers.HandleUpload(ctx, cfg)
+		}
 
 		return nil
 	})
@@ -205,7 +248,19 @@ func main() {
 	adminBot.Router.Use(adminMiddleware)
 
 	// Admin commands
-	adminBot.Router.On("/admin", adminhandlers.AdminPanel)
+	adminBot.Router.On("/admin", func(ctx *bot.Context) error {
+		log.Printf("[ADMIN] /admin received from %d", ctx.SenderID())
+		_, err := ctx.Reply("Admin access granted")
+		if err != nil {
+			log.Printf("[ADMIN] Reply failed: %v", err)
+			// Try using instance.MainBot instead
+			_, err2 := instance.MainBot.SendMessage(ctx.ChatID(), "Admin access (via main bot)")
+			if err2 != nil {
+				log.Printf("[ADMIN] MainBot reply also failed: %v", err2)
+			}
+		}
+		return nil
+	})
 	adminBot.Router.On("/stats", adminhandlers.AdmStats)
 	adminBot.Router.On("/cancel", adminhandlers.AdminCancel)
 
@@ -217,8 +272,8 @@ func main() {
 
 	// User management
 	adminBot.Router.OnCallback("adm_lookup", adminhandlers.AdmLookupPrompt)
-	adminBot.Router.OnCallback("adm_ban", adminhandlers.AdmBanPrompt)
-	adminBot.Router.OnCallback("adm_unban", adminhandlers.AdmUnbanPrompt)
+	adminBot.Router.OnCallback("adm_ban_prompt", adminhandlers.AdmBanPrompt)
+	adminBot.Router.OnCallback("adm_unban_prompt", adminhandlers.AdmUnbanPrompt)
 	adminBot.Router.OnCallback("adm_set_storage", adminhandlers.AdmSetStoragePrompt)
 	adminBot.Router.OnCallback("adm_add_bonus", adminhandlers.AdmAddBonusGeneral)
 	adminBot.Router.OnCallback("adm_setstg_", func(ctx *bot.Context) error {
@@ -376,11 +431,21 @@ func main() {
 		// Polling mode
 		log.Println("Starting bots in polling mode...")
 		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("Recovered from panic in bot polling: %v", r)
+				}
+			}()
 			if err := b.StartPolling(5*time.Second, 20*time.Second); err != nil {
 				log.Printf("Bot polling error: %v", err)
 			}
 		}()
 		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("Recovered from panic in admin bot polling: %v", r)
+				}
+			}()
 			if err := adminBot.StartPolling(5*time.Second, 20*time.Second); err != nil {
 				log.Printf("Admin bot polling error: %v", err)
 			}
@@ -393,6 +458,8 @@ func main() {
 	<-quit
 
 	log.Println("Shutting down...")
+	b.Stop()
+	adminBot.Stop()
 }
 
 // parseDynamicSuffix extracts the suffix after a prefix from the callback data.

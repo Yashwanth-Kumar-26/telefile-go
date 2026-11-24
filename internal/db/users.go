@@ -157,7 +157,8 @@ func GetHighStorageUsers(ctx context.Context, thresholdPercent float64) ([]*mode
 		SELECT id, username, name, storage_limit_gb, storage_used_bytes,
 		       is_banned, referral_code, referred_by, created_at, last_active
 		FROM users
-		WHERE (storage_used_bytes::float / (storage_limit_gb * 1024 * 1024 * 1024)) > $1
+		WHERE storage_limit_gb > 0
+			AND (storage_used_bytes::float / (storage_limit_gb * 1024 * 1024 * 1024)) > $1
 		AND is_banned = false
 	`, thresholdPercent/100.0)
 	if err != nil {

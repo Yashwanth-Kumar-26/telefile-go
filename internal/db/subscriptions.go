@@ -21,6 +21,7 @@ func GetSubscription(ctx context.Context, name string) (*models.Subscription, er
 		return nil, err
 	}
 	sub.Features = json.RawMessage(features)
+	populateDurationDays(sub, features)
 	return sub, nil
 }
 
@@ -46,6 +47,7 @@ func GetAllSubscriptions(ctx context.Context) ([]*models.Subscription, error) {
 			return nil, err
 		}
 		sub.Features = json.RawMessage(features)
+		populateDurationDays(sub, features)
 		subs = append(subs, sub)
 	}
 	return subs, nil
@@ -81,6 +83,7 @@ func GetAllPlans(ctx context.Context) ([]*models.Subscription, error) {
 		}
 		if features != nil {
 			p.Features = features
+			populateDurationDays(p, features)
 		}
 		plans = append(plans, p)
 	}
@@ -91,7 +94,7 @@ func GetAllPlans(ctx context.Context) ([]*models.Subscription, error) {
 func CreatePlan(ctx context.Context, name, description string, price float64, storageGB int64, durationDays int64) (int, error) {
 	// Build features JSON with duration
 	features := map[string]interface{}{
-		"description": description,
+		"description":   description,
 		"duration_days": durationDays,
 	}
 	featuresJSON, _ := json.Marshal(features)
@@ -119,6 +122,7 @@ func GetSubscriptionByID(ctx context.Context, id int) (*models.Subscription, err
 		return nil, err
 	}
 	sub.Features = json.RawMessage(features)
+	populateDurationDays(sub, features)
 	return sub, nil
 }
 
@@ -131,6 +135,18 @@ func CreatePendingPayment(ctx context.Context, userID int64, planID int, planNam
 		RETURNING id
 	`, userID, planID, planName, amount, screenshotFileID, firstName).Scan(&id)
 	return id, err
+}
+
+// populateDurationDays extracts duration_days from features JSON into the struct field
+func populateDurationDays(sub *models.Subscription, features []byte) {
+	if len(features) > 0 {
+		var data map[string]interface{}
+		if err := json.Unmarshal(features, &data); err == nil {
+			if days, ok := data["duration_days"].(float64); ok {
+				sub.DurationDays = int64(days)
+			}
+		}
+	}
 }
 
 // DeletePlan soft-deletes a plan by setting is_active to false

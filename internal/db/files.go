@@ -175,7 +175,7 @@ func SetBatchLink(ctx context.Context, batchID int, linkID string) error {
 // GetBatchFiles returns all files in a batch
 func GetBatchFiles(ctx context.Context, linkID string) ([]*models.File, error) {
 	rows, err := Pool.Query(ctx, `
-		SELECT f.id, f.user_id, f.file_name, f.file_size, f.telegram_file_id, f.unique_link, f.password, f.download_limit, f.expires_at, f.created_at
+		SELECT f.id, f.user_id, f.file_name, f.file_size, f.file_type, f.telegram_file_id, f.unique_link, f.password, f.download_limit, f.download_count, f.expires_at, f.created_at
 		FROM files f
 		JOIN batches b ON f.batch_id = b.id
 		WHERE b.unique_link_id = $1
@@ -188,7 +188,7 @@ func GetBatchFiles(ctx context.Context, linkID string) ([]*models.File, error) {
 	var files []*models.File
 	for rows.Next() {
 		f := &models.File{}
-		err := rows.Scan(&f.ID, &f.UserID, &f.FileName, &f.FileSize, &f.TelegramFileID, &f.UniqueLink, &f.Password, &f.DownloadLimit, &f.ExpiresAt, &f.CreatedAt)
+		err := rows.Scan(&f.ID, &f.UserID, &f.FileName, &f.FileSize, &f.FileType, &f.TelegramFileID, &f.UniqueLink, &f.Password, &f.DownloadLimit, &f.DownloadCount, &f.ExpiresAt, &f.CreatedAt)
 		if err != nil {
 			return nil, err
 		}

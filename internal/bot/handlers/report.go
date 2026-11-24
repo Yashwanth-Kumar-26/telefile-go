@@ -13,7 +13,7 @@ var ReportStates = make(map[int64]bool)
 func StartReport(ctx *bot.Context) error {
 	senderID := ctx.SenderID()
 	ReportStates[senderID] = true
-	_, _ = ctx.Reply("📋 *Report an Issue*\n\nPlease describe your issue in a few words?")
+	_, _ = ctx.Reply("Report an Issue\n\nPlease describe your issue in a few words:")
 	return nil
 }
 
@@ -31,12 +31,7 @@ func HandleReport(ctx *bot.Context) error {
 
 	delete(ReportStates, senderID)
 
-	text := fmt.Sprintf(`📋 *Issue Reported*
-
-Thank you! Our team will review your issue.
-Issue: %s
-
-We will get back to you soon.`, issue)
+	text := fmt.Sprintf("*Issue Reported*\n\nThank you! Our team will review your issue.\nIssue: %s\n\nWe will get back to you soon.", issue)
 
 	_, err := ctx.Reply(text, bot.WithParseMode("Markdown"))
 	return err
@@ -47,7 +42,7 @@ func CancelReport(ctx *bot.Context) error {
 	senderID := ctx.SenderID()
 	if ReportStates[senderID] {
 		delete(ReportStates, senderID)
-		_, _ = ctx.Reply("✅ Report cancelled.")
+		_, _ = ctx.Reply("Report cancelled.")
 		return nil
 	}
 	return nil

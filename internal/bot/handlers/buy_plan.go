@@ -27,17 +27,17 @@ func ShowBuyPlanMenu(ctx *bot.Context) error {
 
 	subs, err := db.GetAllSubscriptions(context.Background())
 	if err != nil {
-		_, _ = ctx.Reply("❌ Failed to load plans. Please try again.")
+		_, _ = ctx.Reply("Failed to load plans. Please try again.")
 		return nil
 	}
 
-	text := "💳 *Select a Plan to Buy*\n\n"
-	text += "📱 *Payment Process:*\n"
-	text += "1️⃣ Select your plan below\n"
-	text += "2️⃣ Pay via UPI to *telefile@upi*\n"
-	text += "3️⃣ Take screenshot of payment\n"
-	text += "4️⃣ Send screenshot here\n"
-	text += "5️⃣ We'll verify and activate! ✅\n\n"
+	text := "Select a Plan to Buy\n\n"
+	text += "Payment Process:\n"
+	text += "1. Select your plan below\n"
+	text += "2. Pay via UPI to telefile@upi\n"
+	text += "3. Take screenshot of payment\n"
+	text += "4. Send screenshot here\n"
+	text += "5. We will verify and activate!\n\n"
 
 	markup := bot.NewInlineKeyboard()
 
@@ -58,7 +58,7 @@ func ShowBuyPlanMenu(ctx *bot.Context) error {
 		markup.InlineKeyboard = append(markup.InlineKeyboard,
 			[]bot.InlineKeyboardButton{
 				bot.InlineButton(
-					fmt.Sprintf("💎 %s — ₹%.0f%s", sub.Name, sub.PriceINR, durationText),
+					fmt.Sprintf("%s - Rs.%.0f%s", sub.Name, sub.PriceINR, durationText),
 					fmt.Sprintf("bp_select_%d", sub.ID),
 				),
 			})
@@ -66,10 +66,10 @@ func ShowBuyPlanMenu(ctx *bot.Context) error {
 
 	markup.InlineKeyboard = append(markup.InlineKeyboard,
 		[]bot.InlineKeyboardButton{
-			bot.InlineButton("💰 UPI: telefile@upi", "bp_upi"),
+			bot.InlineButton("UPI: telefile@upi", "bp_upi"),
 		},
 		[]bot.InlineKeyboardButton{
-			bot.InlineButton("⬅️ Back to Plans", "plans"),
+			bot.InlineButton("Back to Plans", "plans"),
 		})
 
 	if ctx.CallbackQuery != nil {
@@ -86,12 +86,12 @@ func BuyPlanSelect(ctx *bot.Context, planID int) error {
 
 	sub, err := db.GetSubscriptionByID(context.Background(), planID)
 	if err != nil || sub == nil {
-		_, _ = ctx.Reply("❌ Plan not found.")
+		_, _ = ctx.Reply("Plan not found.")
 		return nil
 	}
 
 	if sub.PriceINR <= 0 {
-		_, _ = ctx.Reply("❌ This plan is free!")
+		_, _ = ctx.Reply("This plan is free!")
 		return nil
 	}
 
@@ -109,21 +109,21 @@ func BuyPlanSelect(ctx *bot.Context, planID int) error {
 
 	durationText := ""
 	if features.DurationDays > 0 {
-		durationText = fmt.Sprintf("\n⏰ Valid for *%d days*", features.DurationDays)
+		durationText = fmt.Sprintf("\nValid for %d days", features.DurationDays)
 	}
 
-	text := fmt.Sprintf("💎 *Selected: %s*\n\n", sub.Name)
-	text += fmt.Sprintf("💰 Price: *₹%.0f*\n", sub.PriceINR)
-	text += fmt.Sprintf("💾 Storage: *%s*%s\n\n", storageLabel(sub.StorageGB), durationText)
-	text += "📱 *Payment Instructions:*\n\n"
-	text += fmt.Sprintf("1️⃣ Pay *₹%.0f* to UPI ID:\n   `telefile@upi`\n\n", sub.PriceINR)
-	text += "2️⃣ Take a screenshot of payment confirmation\n\n"
-	text += "3️⃣ Send the screenshot in this chat\n\n"
-	text += "⏳ *We'll verify and activate your plan within 24 hours*"
+	text := fmt.Sprintf("Selected: %s\n\n", sub.Name)
+	text += fmt.Sprintf("Price: Rs.%.0f\n", sub.PriceINR)
+	text += fmt.Sprintf("Storage: %s%s\n\n", storageLabel(sub.StorageGB), durationText)
+	text += "Payment Instructions:\n\n"
+	text += fmt.Sprintf("1. Pay Rs.%.0f to UPI ID:\n   telefile@upi\n\n", sub.PriceINR)
+	text += "2. Take a screenshot of payment confirmation\n\n"
+	text += "3. Send the screenshot in this chat\n\n"
+	text += "We will verify and activate your plan within 24 hours"
 
 	markup := bot.NewInlineKeyboard(
 		[]bot.InlineKeyboardButton{
-			bot.InlineButton("🔄 Cancel", "buy_plan"),
+			bot.InlineButton("Cancel", "buy_plan"),
 		},
 	)
 
@@ -153,7 +153,7 @@ func storageLabel(gb int) string {
 func BuyPlanHandlePhoto(ctx *bot.Context) error {
 	senderID := ctx.SenderID()
 	log.Printf("[BUY_PLAN] Photo received from user %d", senderID)
-	
+
 	if !adminhandlers.AdminFSM.HasState(senderID, adminhandlers.StateBuyPlanUpload) {
 		log.Printf("[BUY_PLAN] User %d not in buy plan state", senderID)
 		return nil
@@ -176,7 +176,7 @@ func BuyPlanHandlePhoto(ctx *bot.Context) error {
 
 	if fileID == "" {
 		log.Printf("[BUY_PLAN] User %d no file ID found", senderID)
-		_, _ = ctx.Reply("❌ Please send a screenshot of your payment.")
+		_, _ = ctx.Reply("Please send a screenshot of your payment.")
 		return nil
 	}
 
@@ -186,30 +186,30 @@ func BuyPlanHandlePhoto(ctx *bot.Context) error {
 	}
 
 	log.Printf("[BUY_PLAN] Creating payment for user %d, plan %s, amount %.0f", senderID, state.PlanName, state.Amount)
-	
+
 	paymentID, err := db.CreatePendingPayment(ctx.Context(), senderID, state.PlanID, state.PlanName, state.Amount, fileID, firstName)
 	if err != nil {
 		log.Printf("[BUY_PLAN] ERROR creating payment: %v", err)
 		adminhandlers.AdminFSM.End(senderID)
-		_, _ = ctx.Reply(fmt.Sprintf("❌ Failed to submit payment: %v", err))
+		_, _ = ctx.Reply(fmt.Sprintf("Failed to submit payment: %v", err))
 		return nil
 	}
 
 	adminhandlers.AdminFSM.End(senderID)
 	delete(BuyPlanStates, senderID)
 
-	text := "✅ *Payment Submitted!*\n\n"
-	text += fmt.Sprintf("📋 *Plan:* %s\n", state.PlanName)
-	text += fmt.Sprintf("💰 *Amount:* ₹%.0f\n", state.Amount)
-	text += fmt.Sprintf("🔢 *Payment ID:* #%d\n\n", paymentID)
-	text += "⏳ *Verification in progress...*\n"
-	text += "You'll be notified once an admin reviews your payment.\n\n"
-	text += "Thank you for your purchase! 🎉"
+	text := "Payment Submitted!\n\n"
+	text += fmt.Sprintf("Plan: %s\n", state.PlanName)
+	text += fmt.Sprintf("Amount: Rs.%.0f\n", state.Amount)
+	text += fmt.Sprintf("Payment ID: #%d\n\n", paymentID)
+	text += "Verification in progress...\n"
+	text += "You will be notified once an admin reviews your payment.\n\n"
+	text += "Thank you for your purchase!"
 
 	markup := bot.NewInlineKeyboard()
 	markup.InlineKeyboard = append(markup.InlineKeyboard,
 		[]bot.InlineKeyboardButton{
-			bot.InlineButton("🏠 Main Menu", "start"),
+			bot.InlineButton("Main Menu", "start"),
 		},
 	)
 
@@ -231,11 +231,11 @@ func BuyPlanHandleCancel(ctx *bot.Context) error {
 func notifyAdminsPayment(ctx context.Context, userID int64, firstName, planName string, amount float64, fileID string, paymentID int) {
 	admins := []int64{1096262005}
 
-	text := "💳 *New Payment!*\n\n"
-	text += fmt.Sprintf("👤 *User:* %s (`%d`)\n", firstName, userID)
-	text += fmt.Sprintf("📦 *Plan:* %s\n", planName)
-	text += fmt.Sprintf("💰 *Amount:* ₹%.0f\n", amount)
-	text += fmt.Sprintf("🔢 *ID:* #%d\n\n", paymentID)
+	text := "New Payment!\n\n"
+	text += fmt.Sprintf("User: %s (%d)\n", firstName, userID)
+	text += fmt.Sprintf("Plan: %s\n", planName)
+	text += fmt.Sprintf("Amount: Rs.%.0f\n", amount)
+	text += fmt.Sprintf("ID: #%d\n\n", paymentID)
 	text += "Check details in admin: /admin"
 
 	// Use MAIN bot since it received the screenshot (file_id works with main bot only)
@@ -254,19 +254,19 @@ func notifyAdminsPayment(ctx context.Context, userID int64, firstName, planName 
 func ShowUPIQR(ctx *bot.Context) error {
 	_ = ctx.AnswerCallback("", false)
 
-	text := "💰 *UPI Payment*\n\n"
-	text += "📱 *Pay to:* `telefile@upi`\n\n"
+	text := "UPI Payment\n\n"
+	text += "Pay to: telefile@upi\n\n"
 	text += "You can use any UPI app:\n"
-	text += "• Google Pay\n"
-	text += "• PhonePe\n"
-	text += "• Paytm\n"
-	text += "• BHIM\n\n"
+	text += "- Google Pay\n"
+	text += "- PhonePe\n"
+	text += "- Paytm\n"
+	text += "- BHIM\n\n"
 	text += "After payment, take a screenshot and send it here!"
 
 	markup := bot.NewInlineKeyboard()
 	markup.InlineKeyboard = append(markup.InlineKeyboard,
 		[]bot.InlineKeyboardButton{
-			bot.InlineButton("⬅️ Back", "buy_plan"),
+			bot.InlineButton("Back", "buy_plan"),
 		},
 	)
 

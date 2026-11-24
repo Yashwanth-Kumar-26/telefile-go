@@ -19,14 +19,22 @@ type CleanupJob struct{}
 func (c *CleanupJob) Run() {
 	ctx := context.Background()
 
-	count, err := db.DeleteExpiredFiles(ctx)
+	// Delete expired files and decrement user storage in a single CTE query
+	tag, err := db.Pool.Exec(ctx, `
+		WITH deleted AS (
+			DELETE FROM files WHERE expires_at IS NOT NULL AND expires_at < NOW()
+			RETURNING user_id, file_size
+		)
+		UPDATE users SET storage_used_bytes = storage_used_bytes - deleted.file_size
+		FROM deleted WHERE users.id = deleted.user_id
+	`)
 	if err != nil {
 		log.Printf("Cleanup error: %v", err)
 		return
 	}
 
-	if count > 0 {
-		log.Printf("Deleted %d expired files", count)
+	if count := tag.RowsAffected(); count > 0 {
+		log.Printf("Deleted %d expired files and updated storage counters", count)
 	}
 }
 
@@ -45,7 +53,7 @@ func (s *StorageWarningJob) Run() {
 		log.Printf("Warning: User %d is using %.1f%% storage", user.ID, percent)
 
 		if instance.MainBot != nil {
-			msg := fmt.Sprintf("⚠️ *Storage Warning*\n\nYou are using %.1f%% of your storage limit. Please delete some files or upgrade your plan to avoid upload failures.", percent)
+			msg := fmt.Sprintf("Storage Warning\n\nYou are using %.1f%% of your storage limit. Please delete some files or upgrade your plan to avoid upload failures.", percent)
 			_, err := instance.MainBot.SendMessage(user.ID, msg, bot.WithParseMode("Markdown"))
 			if err != nil {
 				log.Printf("Failed to send storage warning to %d: %v", user.ID, err)

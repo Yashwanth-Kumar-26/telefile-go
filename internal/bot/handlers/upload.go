@@ -30,6 +30,7 @@ type UploadState struct {
 	ExpiresIn     time.Duration
 	MaxDownloads  int // -1 = unlimited, 0 = not set yet
 	ControlMsgID  int64
+	StartMsgID    int64
 	AskPhase      string // "expiry" | "password" | "downloads"
 }
 
@@ -40,7 +41,7 @@ func HandleUpload(ctx *bot.Context, cfg *config.Config) error {
 
 	banned, _ := db.IsBanned(context.Background(), senderID)
 	if banned {
-		_, _ = ctx.Reply("Your account has been suspended.")
+		_, _ = ctx.Reply("Your account has been suspended. 🚫")
 		return nil
 	}
 
@@ -73,6 +74,34 @@ func HandleUpload(ctx *bot.Context, cfg *config.Config) error {
 				FileSize: photo[len(photo)-1].FileSize,
 				FileType: "image",
 			}
+		} else if ctx.Message.Video != nil {
+			info = &FileInfo{
+				FileID:   ctx.Message.Video.FileID,
+				FileName: fmt.Sprintf("video_%d.mp4", time.Now().Unix()),
+				FileSize: ctx.Message.Video.FileSize,
+				FileType: "video",
+			}
+		} else if ctx.Message.Audio != nil {
+			info = &FileInfo{
+				FileID:   ctx.Message.Audio.FileID,
+				FileName: fmt.Sprintf("audio_%d.mp3", time.Now().Unix()),
+				FileSize: int64(ctx.Message.Audio.FileSize),
+				FileType: "audio",
+			}
+		} else if ctx.Message.Voice != nil {
+			info = &FileInfo{
+				FileID:   ctx.Message.Voice.FileID,
+				FileName: fmt.Sprintf("voice_%d.ogg", time.Now().Unix()),
+				FileSize: int64(ctx.Message.Voice.FileSize),
+				FileType: "voice",
+			}
+		} else if ctx.Message.Animation != nil {
+			info = &FileInfo{
+				FileID:   ctx.Message.Animation.FileID,
+				FileName: fmt.Sprintf("animation_%d.gif", time.Now().Unix()),
+				FileSize: ctx.Message.Animation.FileSize,
+				FileType: "animation",
+			}
 		}
 	}
 
@@ -82,7 +111,7 @@ func HandleUpload(ctx *bot.Context, cfg *config.Config) error {
 
 	maxSize := cfg.MaxFileSizeMB * 1024 * 1024
 	if info.FileSize > maxSize {
-		_, _ = ctx.Reply(fmt.Sprintf("File too large. Maximum size is %d MB.", cfg.MaxFileSizeMB))
+		_, _ = ctx.Reply(fmt.Sprintf("File too large. Maximum size is %d MB. ⚠️", cfg.MaxFileSizeMB))
 		return nil
 	}
 
@@ -92,40 +121,61 @@ func HandleUpload(ctx *bot.Context, cfg *config.Config) error {
 	}
 
 	if !user.HasAvailableStorage(totalPendingSize + info.FileSize) {
-		_, _ = ctx.Reply("Storage limit exceeded.")
+		_, _ = ctx.Reply("Storage limit exceeded. ⚠️")
 		return nil
 	}
 
 	state.Files = append(state.Files, *info)
 
-	var fileList strings.Builder
-	for i, f := range state.Files {
-		fileList.WriteString(fmt.Sprintf("%d. `%s` (%s)\n", i+1, f.FileName, utils.FormatBytes(f.FileSize)))
+	// Batch mode: delete start message, edit the same progress message
+	if state.BatchMode {
+		// Delete the "Batch Mode Activated!" message on first file
+		if len(state.Files) == 1 && state.StartMsgID != 0 {
+			_ = ctx.Bot.DeleteMessage(ctx.ChatID(), state.StartMsgID)
+		}
+
+		var fileList strings.Builder
+		for i, f := range state.Files {
+			fileList.WriteString(fmt.Sprintf("%d. `%s` (%s)\n", i+1, f.FileName, utils.FormatBytes(f.FileSize)))
+		}
+
+		msg := fmt.Sprintf("Batch Upload in Progress 📦\n\n*Files Collected:*\n%sTotal: %d files.\n\nSend more files or click Done 👇",
+			fileList.String(), len(state.Files))
+
+		markup := bot.NewInlineKeyboard(
+			[]bot.InlineKeyboardButton{
+				bot.InlineButton(fmt.Sprintf("Done (%d files) ✅", len(state.Files)), "upload_batch_done"),
+				bot.InlineButton("Cancel ❌", "upload_cancel"),
+			},
+		)
+
+		if state.ControlMsgID != 0 {
+			_, err := ctx.Bot.EditMessageText(ctx.ChatID(), state.ControlMsgID, msg,
+				bot.WithNewParseMode("Markdown"), bot.WithNewReplyMarkup(markup))
+			if err == nil {
+				return nil
+			}
+		}
+
+		res, _ := ctx.Reply(msg, bot.WithParseMode("Markdown"), bot.WithReplyMarkup(markup))
+		if res != nil {
+			state.ControlMsgID = res.MessageID
+		}
+		return nil
 	}
 
+	// Single file upload: ask about password
+	return showPasswordPrompt(ctx, senderID, state)
+}
+
+func showPasswordPrompt(ctx *bot.Context, senderID int64, state *UploadState) error {
 	markup := bot.NewInlineKeyboard(
 		[]bot.InlineKeyboardButton{
-			bot.InlineButton(fmt.Sprintf("Done (%d files) ✅", len(state.Files)), "upload_batch_done"),
-			bot.InlineButton("Cancel ❌", "upload_cancel"),
+			bot.InlineButton("Yes ✅", "upload_pwd_yes"),
+			bot.InlineButton("No ❌", "upload_pwd_no"),
 		},
 	)
-
-	msg := fmt.Sprintf("📦 *Batch Upload in Progress*\n\n*Files Collected:*\n%s\nTotal: %d files.\n\nSend more files or click **Done**.", 
-		fileList.String(), len(state.Files))
-
-	if state.ControlMsgID != 0 {
-		_, err := ctx.Bot.EditMessageText(ctx.ChatID(), state.ControlMsgID, msg, 
-			bot.WithNewParseMode("Markdown"), bot.WithNewReplyMarkup(markup))
-		if err == nil {
-			return nil
-		}
-	}
-
-	res, _ := ctx.Reply(msg, bot.WithParseMode("Markdown"), bot.WithReplyMarkup(markup))
-	if res != nil {
-		state.ControlMsgID = res.MessageID
-	}
-	state.BatchMode = true
+	_, _ = ctx.Reply("Do you want to set a password? 🔒", bot.WithParseMode("Markdown"), bot.WithReplyMarkup(markup))
 	return nil
 }
 
@@ -144,9 +194,9 @@ func StartBatch(ctx *bot.Context) error {
 			bot.InlineButton("Cancel ❌", "upload_cancel"),
 		},
 	)
-	
-	msg := fmt.Sprintf("📦 *Batch Mode Activated!*\n\nCurrently have %d files.\n\nPlease send all the files you want to include in this batch, then click **Done**.", len(state.Files))
-	
+
+	msg := fmt.Sprintf("Batch Mode Activated! 📦\n\nCurrently have %d files.\n\nPlease send all the files you want to include in this batch, then click Done 👇", len(state.Files))
+
 	var res *bot.Message
 	if ctx.CallbackQuery != nil {
 		_ = ctx.AnswerCallback("", false)
@@ -156,6 +206,7 @@ func StartBatch(ctx *bot.Context) error {
 	}
 
 	if res != nil {
+		state.StartMsgID = res.MessageID
 		state.ControlMsgID = res.MessageID
 	}
 	return nil
@@ -163,7 +214,13 @@ func StartBatch(ctx *bot.Context) error {
 
 func UploadPasswordYes(ctx *bot.Context) error {
 	_ = ctx.AnswerCallback("", false)
-	_, _ = ctx.Reply("Please enter a password for your upload:")
+	senderID := ctx.SenderID()
+	state, ok := PendingUploads[senderID]
+	if !ok {
+		return nil
+	}
+	state.AskPhase = "password"
+	_, _ = ctx.Reply("Please enter a password for your upload: 🔑")
 	return nil
 }
 
@@ -172,7 +229,7 @@ func UploadPasswordNo(ctx *bot.Context) error {
 	senderID := ctx.SenderID()
 	state, ok := PendingUploads[senderID]
 	if !ok {
-		log.Printf("[ERROR] UploadPasswordNo: No state found for user %d", senderID)
+		log.Printf("UploadPasswordNo: No state found for user %d", senderID)
 		return nil
 	}
 	state.Password = ""
@@ -188,6 +245,10 @@ func HandlePasswordInput(ctx *bot.Context) error {
 
 	if state.Password == "" && ctx.Text() != "" {
 		state.Password = ctx.Text()
+		// Delete password message from chat for privacy
+		if ctx.Message != nil {
+			_ = ctx.Bot.DeleteMessage(ctx.ChatID(), ctx.Message.MessageID)
+		}
 		return showExpiryOptions(ctx)
 	}
 	return nil
@@ -197,34 +258,34 @@ func showExpiryOptions(ctx *bot.Context) error {
 	senderID := ctx.SenderID()
 	state, ok := PendingUploads[senderID]
 	if !ok {
-		log.Printf("[ERROR] showExpiryOptions: No state found for user %d", senderID)
+		log.Printf("showExpiryOptions: No state found for user %d", senderID)
 		return nil
 	}
 
 	markup := bot.NewInlineKeyboard(
 		[]bot.InlineKeyboardButton{
-			bot.InlineButton("1 Hour", "upload_exp_1h"),
-			bot.InlineButton("24 Hours", "upload_exp_24h"),
+			bot.InlineButton("1 Hour ⏰", "upload_exp_1h"),
+			bot.InlineButton("24 Hours ⏰", "upload_exp_24h"),
 		},
 		[]bot.InlineKeyboardButton{
-			bot.InlineButton("7 Days", "upload_exp_7d"),
-			bot.InlineButton("30 Days", "upload_exp_30d"),
+			bot.InlineButton("7 Days 📅", "upload_exp_7d"),
+			bot.InlineButton("30 Days 📅", "upload_exp_30d"),
 		},
 		[]bot.InlineKeyboardButton{
-			bot.InlineButton("Never", "upload_exp_never"),
+			bot.InlineButton("Never ♾️", "upload_exp_never"),
 		},
 	)
-	
-	msg := fmt.Sprintf("⏳ *Upload Ready (%d files)*\n\nWhen should your upload expire?", len(state.Files))
-	
+
+	msg := fmt.Sprintf("Upload Ready (%d files) ✅\n\nWhen should your upload expire? ⏳", len(state.Files))
+
 	if state.ControlMsgID != 0 {
-		_, err := ctx.Bot.EditMessageText(ctx.ChatID(), state.ControlMsgID, msg, 
+		_, err := ctx.Bot.EditMessageText(ctx.ChatID(), state.ControlMsgID, msg,
 			bot.WithNewParseMode("Markdown"), bot.WithNewReplyMarkup(markup))
 		if err == nil {
 			return nil
 		}
 	}
-	
+
 	_, _ = ctx.Reply(msg, bot.WithParseMode("Markdown"), bot.WithReplyMarkup(markup))
 	return nil
 }
@@ -234,7 +295,7 @@ func UploadExpiryHandler(ctx *bot.Context, cfg *config.Config, hours int) error 
 	senderID := ctx.SenderID()
 	state, ok := PendingUploads[senderID]
 	if !ok || len(state.Files) == 0 {
-		log.Printf("[ERROR] UploadExpiryHandler: No state found for user %d", senderID)
+		log.Printf("UploadExpiryHandler: No state found for user %d", senderID)
 		return nil
 	}
 
@@ -291,32 +352,43 @@ func UploadExpiryHandler(ctx *bot.Context, cfg *config.Config, hours int) error 
 	var resultText string
 	if batchID != nil {
 		shareLink = fmt.Sprintf("https://t.me/%s?start=batch_%s", cfg.BotUsername, batchLinkID)
-		resultText = fmt.Sprintf("✅ *Batch Upload Complete!*\n\nFiles: %d\nTotal Size: %s\nLink: `%s`", len(state.Files), utils.FormatBytes(totalSize), shareLink)
+		resultText = fmt.Sprintf("Batch Upload Complete! ✅\n\nFiles: %d\nTotal Size: %s\nLink: `%s`", len(state.Files), utils.FormatBytes(totalSize), shareLink)
 	} else {
 		file := savedFiles[0]
 		shareLink = fmt.Sprintf("https://t.me/%s?start=file_%s", cfg.BotUsername, file.UniqueLink)
-		resultText = fmt.Sprintf("✅ *Upload Complete!*\n\nFile: `%s`\nSize: %s\nLink: `%s`", file.FileName, utils.FormatBytes(file.FileSize), shareLink)
+		resultText = fmt.Sprintf("Upload Complete! ✅\n\nFile: `%s`\nSize: %s\nLink: `%s`", file.FileName, utils.FormatBytes(file.FileSize), shareLink)
 	}
 
 	if state.ControlMsgID != 0 {
-		_, _ = ctx.Bot.EditMessageText(ctx.ChatID(), state.ControlMsgID, resultText, bot.WithNewParseMode("Markdown"))
-	} else {
-		_, _ = ctx.Reply(resultText, bot.WithParseMode("Markdown"))
+		_, err := ctx.Bot.EditMessageText(ctx.ChatID(), state.ControlMsgID, resultText, bot.WithNewParseMode("Markdown"))
+		if err == nil {
+			goto afterResult
+		}
 	}
+	_, _ = ctx.Reply(resultText, bot.WithParseMode("Markdown"))
+afterResult:
 
 	for _, f := range savedFiles {
 		_, _ = ctx.Bot.SendDocument(ctx.ChatID(), f.TelegramFileID, fmt.Sprintf("File: %s (%s)", f.FileName, utils.FormatBytes(f.FileSize)))
 	}
 
+	// Referral bonus
 	fileCount, _ := db.GetUserFileCount(context.Background(), senderID)
-	if fileCount <= len(state.Files) { 
+	if fileCount <= len(state.Files) {
 		user, _ := db.GetUser(context.Background(), senderID)
 		if user != nil && user.ReferredBy != nil {
-			bonusGB := int64(5)
-			_ = db.UpdateUserLimit(context.Background(), *user.ReferredBy, bonusGB)
-			_ = db.UpdateUserLimit(context.Background(), senderID, bonusGB)
-			if instance.MainBot != nil {
-				_, _ = instance.MainBot.SendMessage(*user.ReferredBy, fmt.Sprintf("🎉 Referral reward! You earned %d GB storage.", bonusGB))
+			existing, _ := db.GetReferralByReferred(context.Background(), senderID)
+			if existing == nil {
+				bonusGB := int64(5)
+				_, err := db.CreateReferral(context.Background(), *user.ReferredBy, senderID, int(bonusGB))
+				if err == nil {
+					_ = db.MarkReferralRedeemed(context.Background(), senderID)
+					_ = db.UpdateUserLimit(context.Background(), *user.ReferredBy, bonusGB)
+					_ = db.UpdateUserLimit(context.Background(), senderID, bonusGB)
+					if instance.MainBot != nil {
+						_, _ = instance.MainBot.SendMessage(*user.ReferredBy, fmt.Sprintf("Referral reward! You earned %d GB storage. 🎉", bonusGB))
+					}
+				}
 			}
 		}
 	}
@@ -327,6 +399,6 @@ func UploadExpiryHandler(ctx *bot.Context, cfg *config.Config, hours int) error 
 func CancelUpload(ctx *bot.Context) error {
 	_ = ctx.AnswerCallback("Upload Cancelled", true)
 	delete(PendingUploads, ctx.SenderID())
-	_, _ = ctx.Reply("Upload cancelled.")
+	_, _ = ctx.Reply("Upload cancelled. ❌")
 	return nil
 }

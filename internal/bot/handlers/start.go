@@ -3,7 +3,6 @@ package handlers
 import (
 	"context"
 	"fmt"
-	"log"
 	"strings"
 
 	"github.com/Yashwanth-Kumar-26/telefile/internal/db"
@@ -13,16 +12,38 @@ import (
 
 // Start handles the /start command
 func Start(ctx *bot.Context) error {
-	updateType := "unknown"
-	if ctx.CallbackQuery != nil {
-		updateType = "callback"
-	} else if ctx.Message != nil {
-		updateType = "message"
+	senderID := ctx.SenderID()
+
+	// Check for pending operations
+	pending := ""
+	if _, ok := PendingUploads[senderID]; ok {
+		pending = "upload"
+	} else if _, ok := DownloadStates[senderID]; ok {
+		pending = "download"
+	} else if RedeemStates[senderID] {
+		pending = "redeem"
+	} else if ReportStates[senderID] {
+		pending = "report"
+	} else if _, ok := BuyPlanStates[senderID]; ok {
+		pending = "buy plan"
 	}
-	log.Printf("[DEBUG] Start called - Type: %s, Text: %q", updateType, ctx.Text())
+
+	if pending != "" {
+		// Ask user if they want to cancel
+		if ctx.Message != nil {
+			markup := bot.NewInlineKeyboard(
+				[]bot.InlineKeyboardButton{
+					bot.InlineButton("Yes", "cancel_confirm"),
+					bot.InlineButton("No", "cancel_deny"),
+				},
+			)
+			_, _ = ctx.Reply("You have a pending "+pending+". Cancel it?", bot.WithParseMode("Markdown"), bot.WithReplyMarkup(markup))
+			return nil
+		}
+		// For callbacks from other menus, just proceed to welcome
+	}
 
 	param := parseStartParam(ctx.Text())
-	log.Printf("[DEBUG] Start param: %q", param)
 
 	// Handle file download link
 	if strings.HasPrefix(param, "file_") {
@@ -36,17 +57,15 @@ func Start(ctx *bot.Context) error {
 
 	// Handle referral - handled in EnsureUser middleware
 
-
-
-	welcomeMsg := fmt.Sprintf("👋 *Welcome back to TeleFile!*\n\nStore & share files with advanced features. 🔒\nPassword protection, expiry, & more!\n\nUse the buttons below to get started:")
+	welcomeMsg := fmt.Sprintf("Welcome to TeleFile! 👋\n\nStore & share files with advanced features.\nPassword protection, expiry, & more! 🔒\n\nUse the buttons below to get started:")
 
 	markup := bot.NewInlineKeyboard(
 		[]bot.InlineKeyboardButton{
 			bot.InlineButton("Upload File 📤", "upload_help"),
-			bot.InlineButton("Batch Upload 📦", "upload_batch"),
+			bot.InlineButton("Batch Upload 📦", "upload_batch_activate"),
 		},
 		[]bot.InlineKeyboardButton{
-			bot.InlineButton("My Files 📂", "myfiles"),
+			bot.InlineButton("My Files 📂", "myfiles_menu"),
 			bot.InlineButton("Plans 💎", "plans"),
 		},
 		[]bot.InlineKeyboardButton{
@@ -60,10 +79,8 @@ func Start(ctx *bot.Context) error {
 	)
 
 	if ctx.CallbackQuery != nil {
-		log.Printf("[DEBUG] Start - using EditMessageText")
 		_, _ = ctx.EditMessageText(welcomeMsg, bot.WithNewParseMode("Markdown"), bot.WithNewReplyMarkup(markup))
 	} else {
-		log.Printf("[DEBUG] Start - using Reply")
 		_, _ = ctx.Reply(welcomeMsg, bot.WithParseMode("Markdown"), bot.WithReplyMarkup(markup))
 	}
 	return nil
@@ -93,7 +110,7 @@ func ShowStats(ctx *bot.Context) error {
 		limitStr = utils.FormatBytes(storageLimit)
 	}
 
-	text := fmt.Sprintf("📊 *Your Statistics*\n\n*Name:* %s\n*ID:* `%d` \n\n*Files:* %d\n*Storage Used:* %s\n*Storage Limit:* %s\n%s\n\n*Referrals:* %d",
+	text := fmt.Sprintf("*Your Statistics*\n\n*Name:* %s\n*ID:* `%d` \n\n*Files:* %d\n*Storage Used:* %s\n*Storage Limit:* %s\n%s\n\n*Referrals:* %d",
 		user.DisplayName(), senderID, fileCount, usedStr, limitStr, progress, refCount)
 
 	markup := bot.NewInlineKeyboard(

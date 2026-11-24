@@ -68,7 +68,6 @@ func (fsm *AdminFSMType) Get(senderID int64) *adminConversation {
 
 func (fsm *AdminFSMType) SetState(senderID int64, state string) {
 	c := fsm.Get(senderID)
-	// Only clear data when first entering a new conversation (not during multi-step flows)
 	if c.State == StateNone || c.State == "" {
 		c.Data = make(map[string]interface{})
 	}
@@ -104,44 +103,43 @@ func (fsm *AdminFSMType) HasState(senderID int64, state string) bool {
 	return fsm.Get(senderID).State == state
 }
 
-// ─── /admin Command & admin_panel Callback ──────────────────────────────────────
-
 // adminKB returns the main admin panel keyboard.
 func adminKB() *bot.InlineKeyboardMarkup {
 	return bot.NewInlineKeyboard(
 		[]bot.InlineKeyboardButton{
-			bot.InlineButton("📊 Statistics", "adm_stats"),
-			bot.InlineButton("👥 User Lookup", "adm_lookup"),
+			bot.InlineButton("Statistics 📊", "adm_stats"),
+			bot.InlineButton("User Lookup 👥", "adm_lookup"),
 		},
 		[]bot.InlineKeyboardButton{
-			bot.InlineButton("🚫 Ban User", "adm_ban"),
-			bot.InlineButton("✅ Unban User", "adm_unban"),
+			bot.InlineButton("Ban User 🚫", "adm_ban_prompt"),
+			bot.InlineButton("Unban User ✅", "adm_unban_prompt"),
 		},
 		[]bot.InlineKeyboardButton{
-			bot.InlineButton("💾 Set Storage", "adm_set_storage"),
-			bot.InlineButton("🎁 Add Bonus", "adm_add_bonus"),
+			bot.InlineButton("Set Storage 💾", "adm_set_storage"),
+			bot.InlineButton("Add Bonus 🎁", "adm_add_bonus"),
 		},
 		[]bot.InlineKeyboardButton{
-			bot.InlineButton("💎 Plans", "adm_plans"),
-			bot.InlineButton("💳 Pending Payments", "adm_payments"),
+			bot.InlineButton("Plans 💎", "adm_plans"),
+			bot.InlineButton("Pending Payments 💳", "adm_payments"),
 		},
 		[]bot.InlineKeyboardButton{
-			bot.InlineButton("🎁 Gift Codes", "adm_gifts"),
-			bot.InlineButton("📢 Broadcast", "adm_broadcast"),
+			bot.InlineButton("Gift Codes 🎁", "adm_gifts"),
+			bot.InlineButton("Broadcast 📢", "adm_broadcast"),
 		},
 		[]bot.InlineKeyboardButton{
-			bot.InlineButton("🧹 Run Cleanup", "adm_cleanup"),
-			bot.InlineButton("🏠 Main Menu", "admin_panel"),
+			bot.InlineButton("Run Cleanup 🧹", "adm_cleanup"),
+			bot.InlineButton("Main Menu", "admin_panel"),
 		},
 	)
 }
 
 func AdminPanel(ctx *bot.Context) error {
+	log.Printf("[ADMIN] AdminPanel called by user %d", ctx.SenderID())
 	userCount, _ := db.GetUserCount(ctx.Context())
 	bannedCount, _ := db.GetBannedCount(ctx.Context())
 	pendingPays, _ := db.GetPendingPaymentCount(ctx.Context())
 
-	text := fmt.Sprintf("*⚙️ Admin Panel* 👑\n\n*Total Users:* %d\n*Banned:* %d\n*Pending Payments:* %d\n\nSelect an option:", userCount, bannedCount, pendingPays)
+	text := fmt.Sprintf("*Admin Panel* ⚙️\n\n*Total Users:* %d\n*Banned:* %d\n*Pending Payments:* %d\n\nSelect an option 👇", userCount, bannedCount, pendingPays)
 	markup := adminKB()
 
 	if ctx.CallbackQuery != nil {
@@ -152,15 +150,11 @@ func AdminPanel(ctx *bot.Context) error {
 	return nil
 }
 
-// ─── /cancel Command ───────────────────────────────────────────────────────────────
-
 func AdminCancel(ctx *bot.Context) error {
 	senderID := ctx.SenderID()
 	AdminFSM.End(senderID)
 	return AdminPanel(ctx)
 }
-
-// ─── Stats ────────────────────────────────────────────────────────────────────────
 
 func AdmStats(ctx *bot.Context) error {
 	_ = ctx.AnswerCallback("", false)
@@ -174,7 +168,7 @@ func AdmStats(ctx *bot.Context) error {
 	activeSubs, _ := db.GetActiveSubscriptionCount(ctx.Context())
 	pendingPays, _ := db.GetPendingPaymentCount(ctx.Context())
 
-	text := fmt.Sprintf("*📊 Global Statistics*\n\n*Users:* %d *(+%d today)* | *Banned:* %d 🚫\n*Files:* %d *(+%d today)* 📁\n*Total Storage Used:* %s 💾\n*Active Subscriptions:* %d 💎\n*Pending Payments:* %d 💳",
+	text := fmt.Sprintf("*Global Statistics* 📊\n\n*Users:* %d *(+%d today)* | *Banned:* %d 🚫\n*Files:* %d *(+%d today)* 📁\n*Total Storage Used:* %s 💾\n*Active Subscriptions:* %d 💎\n*Pending Payments:* %d 💳",
 		userCount, newToday, banned, fileCount, dailyUploads, utils.FormatBytes(totalStorage), activeSubs, pendingPays)
 
 	markup := backKB("admin_panel")
@@ -182,12 +176,10 @@ func AdmStats(ctx *bot.Context) error {
 	return nil
 }
 
-// ─── User Lookup ─────────────────────────────────────────────────────────────────
-
 func AdmLookupPrompt(ctx *bot.Context) error {
 	_ = ctx.AnswerCallback("", false)
 	AdminFSM.SetState(ctx.SenderID(), StateLookupUser)
-	_, _ = ctx.Reply("*👥 User Lookup*\n\nSend a user ID or @username:", bot.WithParseMode("Markdown"), bot.WithReplyMarkup(cancelKB()))
+	_, _ = ctx.Reply("*User Lookup*\n\nSend a user ID or @username:", bot.WithParseMode("Markdown"), bot.WithReplyMarkup(cancelKB()))
 	return nil
 }
 
@@ -200,37 +192,33 @@ func AdmLookupDo(ctx *bot.Context) error {
 
 	query := strings.TrimSpace(ctx.Text())
 
-	// Check if it's a username
 	if strings.HasPrefix(query, "@") {
 		username := strings.TrimPrefix(query, "@")
 		user, err := db.GetUserByUsername(ctx.Context(), username)
 		if err != nil {
-			_, _ = ctx.Reply("❌ User not found.")
+			_, _ = ctx.Reply("User not found. ❌")
 			return nil
 		}
 		return showUserDetail(ctx, user)
 	}
 
-	// Try as numeric user ID
 	uid, err := strconv.ParseInt(query, 10, 64)
 	if err != nil {
-		_, _ = ctx.Reply("❌ Invalid format. Send a user ID (numbers) or @username.")
+		_, _ = ctx.Reply("Invalid format. Send a user ID (numbers) or @username.")
 		return nil
 	}
 	user, err := db.GetUser(ctx.Context(), uid)
 	if err != nil {
-		_, _ = ctx.Reply("❌ User not found.")
+		_, _ = ctx.Reply("User not found.")
 		return nil
 	}
 	return showUserDetail(ctx, user)
 }
 
-// ─── Ban / Unban ────────────────────────────────────────────────────────────────
-
 func AdmBanPrompt(ctx *bot.Context) error {
 	_ = ctx.AnswerCallback("", false)
 	AdminFSM.SetState(ctx.SenderID(), StateBanUser)
-	_, _ = ctx.Reply("*🚫 Ban User*\n\nSend the user ID to ban:", bot.WithParseMode("Markdown"), bot.WithReplyMarkup(cancelKB()))
+	_, _ = ctx.Reply("*Ban User*\n\nSend the user ID to ban:", bot.WithParseMode("Markdown"), bot.WithReplyMarkup(cancelKB()))
 	return nil
 }
 
@@ -243,7 +231,7 @@ func AdmBanDo(ctx *bot.Context) error {
 
 	uid, ok := parseID(ctx.Text())
 	if !ok {
-		_, _ = ctx.Reply("❌ Invalid user ID.")
+		_, _ = ctx.Reply("Invalid user ID.")
 		return nil
 	}
 	return doBan(ctx, uid)
@@ -252,7 +240,7 @@ func AdmBanDo(ctx *bot.Context) error {
 func AdmUnbanPrompt(ctx *bot.Context) error {
 	_ = ctx.AnswerCallback("", false)
 	AdminFSM.SetState(ctx.SenderID(), StateUnbanUser)
-	_, _ = ctx.Reply("*✅ Unban User*\n\nSend the user ID to unban:", bot.WithParseMode("Markdown"), bot.WithReplyMarkup(cancelKB()))
+	_, _ = ctx.Reply("*Unban User*\n\nSend the user ID to unban:", bot.WithParseMode("Markdown"), bot.WithReplyMarkup(cancelKB()))
 	return nil
 }
 
@@ -265,7 +253,7 @@ func AdmUnbanDo(ctx *bot.Context) error {
 
 	uid, ok := parseID(ctx.Text())
 	if !ok {
-		_, _ = ctx.Reply("❌ Invalid user ID.")
+		_, _ = ctx.Reply("Invalid user ID.")
 		return nil
 	}
 	return doUnban(ctx, uid)
@@ -283,25 +271,23 @@ func AdmUnbanDoByID(ctx *bot.Context, uid int64) error {
 
 func doBan(ctx *bot.Context, uid int64) error {
 	_ = db.BanUser(ctx.Context(), uid)
-	_, _ = ctx.Reply(fmt.Sprintf("User `%d` has been banned. ✅", uid), bot.WithParseMode("Markdown"))
-	_, _ = instance.AdminBot.SendMessage(uid, "⚠️ *You have been banned from TeleFile.* 🚫", bot.WithParseMode("Markdown"))
+	_, _ = ctx.Reply(fmt.Sprintf("User `%d` has been banned.", uid), bot.WithParseMode("Markdown"))
+	_, _ = instance.MainBot.SendMessage(uid, "*You have been banned from TeleFile.*", bot.WithParseMode("Markdown"))
 	return nil
 }
 
 func doUnban(ctx *bot.Context, uid int64) error {
 	_ = db.UnbanUser(ctx.Context(), uid)
-	_, _ = ctx.Reply(fmt.Sprintf("User `%d` has been unbanned. ✅", uid), bot.WithParseMode("Markdown"))
-	_, _ = instance.AdminBot.SendMessage(uid, "✅ *You have been unbanned from TeleFile!*", bot.WithParseMode("Markdown"))
+	_, _ = ctx.Reply(fmt.Sprintf("User `%d` has been unbanned.", uid), bot.WithParseMode("Markdown"))
+	_, _ = instance.MainBot.SendMessage(uid, "*You have been unbanned from TeleFile!*", bot.WithParseMode("Markdown"))
 	return nil
 }
-
-// ─── Set Storage ─────────────────────────────────────────────────────────────────
 
 func AdmSetStoragePrompt(ctx *bot.Context) error {
 	_ = ctx.AnswerCallback("", false)
 	AdminFSM.SetState(ctx.SenderID(), StateSetStorage)
 	AdminFSM.SetData(ctx.SenderID(), "target_id", int64(0))
-	_, _ = ctx.Reply("*💾 Set Storage*\n\nSend: `USER_ID STORAGE_GB`\nExample: `123456789 50`", bot.WithParseMode("Markdown"), bot.WithReplyMarkup(cancelKB()))
+	_, _ = ctx.Reply("*Set Storage*\n\nSend: `USER_ID STORAGE_GB`\nExample: `123456789 50`", bot.WithParseMode("Markdown"), bot.WithReplyMarkup(cancelKB()))
 	return nil
 }
 
@@ -309,7 +295,7 @@ func AdmSetStorageForUser(ctx *bot.Context, uid int64) error {
 	_ = ctx.AnswerCallback("", false)
 	AdminFSM.SetState(ctx.SenderID(), StateSetStorage)
 	AdminFSM.SetData(ctx.SenderID(), "target_id", uid)
-	_, _ = ctx.Reply(fmt.Sprintf("*💾 Set Storage for* `%d`\n\nSend GB amount (e.g. `50`):", uid), bot.WithParseMode("Markdown"), bot.WithReplyMarkup(cancelKB()))
+	_, _ = ctx.Reply(fmt.Sprintf("*Set Storage for* `%d`\n\nSend GB amount (e.g. `50`):", uid), bot.WithParseMode("Markdown"), bot.WithReplyMarkup(cancelKB()))
 	return nil
 }
 
@@ -324,36 +310,34 @@ func AdmSetStorageDo(ctx *bot.Context) error {
 
 	if targetID == 0 {
 		if len(parts) != 2 || !isDigit(parts[0]) || !isDigit(parts[1]) {
-			_, _ = ctx.Reply("❌ Format: `USER_ID STORAGE_GB`")
+			_, _ = ctx.Reply("Format: `USER_ID STORAGE_GB`")
 			return nil
 		}
 		targetID, _ = strconv.ParseInt(parts[0], 10, 64)
 		gb, _ := strconv.ParseInt(parts[1], 10, 64)
 		_ = db.UpdateUserStorageLimit(ctx.Context(), targetID, gb)
 		AdminFSM.End(senderID)
-		_, _ = ctx.Reply(fmt.Sprintf("✅ Storage for `%d` set to *%d GB* (absolute).", targetID, gb), bot.WithParseMode("Markdown"))
-		_, _ = instance.AdminBot.SendMessage(targetID, fmt.Sprintf("📦 Your storage limit has been set to *%d GB* by an admin.", gb), bot.WithParseMode("Markdown"))
+		_, _ = ctx.Reply(fmt.Sprintf("Storage for `%d` set to *%d GB* (absolute).", targetID, gb), bot.WithParseMode("Markdown"))
+		_, _ = instance.MainBot.SendMessage(targetID, fmt.Sprintf("Your storage limit has been set to *%d GB* by an admin.", gb), bot.WithParseMode("Markdown"))
 	} else {
 		if len(parts) != 1 || !isDigit(parts[0]) {
-			_, _ = ctx.Reply("❌ Send GB number only.")
+			_, _ = ctx.Reply("Send GB number only.")
 			return nil
 		}
 		gb, _ := strconv.ParseInt(parts[0], 10, 64)
 		_ = db.UpdateUserStorageLimit(ctx.Context(), targetID, gb)
 		AdminFSM.End(senderID)
-		_, _ = ctx.Reply(fmt.Sprintf("✅ Storage for `%d` set to *%d GB* (absolute).", targetID, gb), bot.WithParseMode("Markdown"))
-		_, _ = instance.AdminBot.SendMessage(targetID, fmt.Sprintf("📦 Your storage limit has been set to *%d GB* by an admin.", gb), bot.WithParseMode("Markdown"))
+		_, _ = ctx.Reply(fmt.Sprintf("Storage for `%d` set to *%d GB* (absolute).", targetID, gb), bot.WithParseMode("Markdown"))
+		_, _ = instance.MainBot.SendMessage(targetID, fmt.Sprintf("Your storage limit has been set to *%d GB* by an admin.", gb), bot.WithParseMode("Markdown"))
 	}
 	return nil
 }
-
-// ─── Add Bonus ──────────────────────────────────────────────────────────────────
 
 func AdmAddBonusPrompt(ctx *bot.Context, uid int64) error {
 	_ = ctx.AnswerCallback("", false)
 	AdminFSM.SetState(ctx.SenderID(), StateAddBonus)
 	AdminFSM.SetData(ctx.SenderID(), "target_id", uid)
-	_, _ = ctx.Reply(fmt.Sprintf("*🎁 Add Bonus to* `%d`\n\nSend GB amount (e.g. `10`):", uid), bot.WithParseMode("Markdown"), bot.WithReplyMarkup(cancelKB()))
+	_, _ = ctx.Reply(fmt.Sprintf("*Add Bonus to* `%d`\n\nSend GB amount (e.g. `10`):", uid), bot.WithParseMode("Markdown"), bot.WithReplyMarkup(cancelKB()))
 	return nil
 }
 
@@ -361,7 +345,7 @@ func AdmAddBonusGeneral(ctx *bot.Context) error {
 	_ = ctx.AnswerCallback("", false)
 	AdminFSM.SetState(ctx.SenderID(), StateAddBonus)
 	AdminFSM.SetData(ctx.SenderID(), "target_id", int64(0))
-	_, _ = ctx.Reply("*🎁 Add Bonus Storage*\n\nSend: `USER_ID GB`", bot.WithParseMode("Markdown"), bot.WithReplyMarkup(cancelKB()))
+	_, _ = ctx.Reply("*Add Bonus Storage*\n\nSend: `USER_ID GB`", bot.WithParseMode("Markdown"), bot.WithReplyMarkup(cancelKB()))
 	return nil
 }
 
@@ -376,46 +360,44 @@ func AdmAddBonusDo(ctx *bot.Context) error {
 
 	if targetID == 0 {
 		if len(parts) != 2 || !isDigit(parts[0]) || !isDigit(parts[1]) {
-			_, _ = ctx.Reply("❌ Format: `USER_ID GB`")
+			_, _ = ctx.Reply("Format: `USER_ID GB`")
 			return nil
 		}
 		targetID, _ = strconv.ParseInt(parts[0], 10, 64)
 		gb, _ := strconv.ParseInt(parts[1], 10, 64)
 		_ = db.UpdateUserLimit(ctx.Context(), targetID, gb)
 		AdminFSM.End(senderID)
-		_, _ = ctx.Reply(fmt.Sprintf("✅ Added *+%d GB* bonus to `%d`.", gb, targetID), bot.WithParseMode("Markdown"))
-		_, _ = instance.AdminBot.SendMessage(targetID, fmt.Sprintf("🎁 *Bonus Alert!* +%d GB storage added by admin!", gb), bot.WithParseMode("Markdown"))
+		_, _ = ctx.Reply(fmt.Sprintf("Added *+%d GB* bonus to `%d`.", gb, targetID), bot.WithParseMode("Markdown"))
+		_, _ = instance.MainBot.SendMessage(targetID, fmt.Sprintf("*Bonus Alert!* +%d GB storage added by admin!", gb), bot.WithParseMode("Markdown"))
 	} else {
 		if len(parts) != 1 || !isDigit(parts[0]) {
-			_, _ = ctx.Reply("❌ Send GB number only.")
+			_, _ = ctx.Reply("Send GB number only.")
 			return nil
 		}
 		gb, _ := strconv.ParseInt(parts[0], 10, 64)
 		_ = db.UpdateUserLimit(ctx.Context(), targetID, gb)
 		AdminFSM.End(senderID)
-		_, _ = ctx.Reply(fmt.Sprintf("✅ Added *+%d GB* bonus to `%d`.", gb, targetID), bot.WithParseMode("Markdown"))
-		_, _ = instance.AdminBot.SendMessage(targetID, fmt.Sprintf("🎁 *Bonus Alert!* +%d GB storage added by admin!", gb), bot.WithParseMode("Markdown"))
+		_, _ = ctx.Reply(fmt.Sprintf("Added *+%d GB* bonus to `%d`.", gb, targetID), bot.WithParseMode("Markdown"))
+		_, _ = instance.MainBot.SendMessage(targetID, fmt.Sprintf("*Bonus Alert!* +%d GB storage added by admin!", gb), bot.WithParseMode("Markdown"))
 	}
 	return nil
 }
-
-// ─── Plans Management ────────────────────────────────────────────────────────────
 
 func AdmPlans(ctx *bot.Context) error {
 	_ = ctx.AnswerCallback("", false)
 	plans, _ := db.GetAllPlans(ctx.Context())
 
 	var b strings.Builder
-	b.WriteString("*💎 All Plans*\n\n")
+	b.WriteString("*All Plans*\n\n")
 	if len(plans) == 0 {
 		b.WriteString("No plans yet.")
 	} else {
 		for _, p := range plans {
-			status := "Active ✅"
+			status := "Active"
 			if !p.IsActive {
-				status = "Inactive ❌"
+				status = "Inactive"
 			}
-			b.WriteString(fmt.Sprintf("• *%s* — %d GB — ₹%.0f — %d days — %s\n",
+			b.WriteString(fmt.Sprintf("- *%s* - %d GB - Rs.%.0f - %d days - %s\n",
 				p.Name, p.StorageGB, p.PriceINR, p.DurationDays, status))
 		}
 	}
@@ -425,16 +407,16 @@ func AdmPlans(ctx *bot.Context) error {
 		if p.IsActive {
 			markup.InlineKeyboard = append(markup.InlineKeyboard,
 				[]bot.InlineKeyboardButton{
-					bot.InlineButton(fmt.Sprintf("🗑️ Delete: %s", p.Name), fmt.Sprintf("adm_delplan_%d", p.ID)),
+					bot.InlineButton(fmt.Sprintf("Delete: %s", p.Name), fmt.Sprintf("adm_delplan_%d", p.ID)),
 				})
 		}
 	}
 	markup.InlineKeyboard = append(markup.InlineKeyboard,
 		[]bot.InlineKeyboardButton{
-			bot.InlineButton("➕ Create Plan", "adm_create_plan"),
+			bot.InlineButton("Create Plan", "adm_create_plan"),
 		},
 		[]bot.InlineKeyboardButton{
-			bot.InlineButton("⬅️ Back", "admin_panel"),
+			bot.InlineButton("Back", "admin_panel"),
 		})
 
 	_, _ = ctx.Reply(b.String(), bot.WithParseMode("Markdown"), bot.WithReplyMarkup(markup))
@@ -442,7 +424,7 @@ func AdmPlans(ctx *bot.Context) error {
 }
 
 func AdmDelPlan(ctx *bot.Context, planID int) error {
-	_ = ctx.AnswerCallback("Plan deactivated ✅", false)
+	_ = ctx.AnswerCallback("Plan deactivated", false)
 	_ = db.DeletePlan(ctx.Context(), planID)
 	return AdmPlans(ctx)
 }
@@ -450,7 +432,7 @@ func AdmDelPlan(ctx *bot.Context, planID int) error {
 func AdmCreatePlanStart(ctx *bot.Context) error {
 	_ = ctx.AnswerCallback("", false)
 	AdminFSM.SetState(ctx.SenderID(), StateCreatePlanName)
-	_, _ = ctx.Reply("*➕ Create Plan*\n\n*Step 1/5:* Enter plan *name*:", bot.WithParseMode("Markdown"), bot.WithReplyMarkup(backKB("adm_plans")))
+	_, _ = ctx.Reply("*Create Plan*\n\n*Step 1/5:* Enter plan *name*:", bot.WithParseMode("Markdown"), bot.WithReplyMarkup(backKB("adm_plans")))
 	return nil
 }
 
@@ -461,7 +443,7 @@ func AdmCreatePlanName(ctx *bot.Context) error {
 	}
 	AdminFSM.SetData(senderID, "plan_name", strings.TrimSpace(ctx.Text()))
 	AdminFSM.SetState(senderID, StateCreatePlanPrice)
-	_, _ = ctx.Reply("*Step 2/5:* Enter *price* in ₹ (e.g. `99`):", bot.WithParseMode("Markdown"), bot.WithReplyMarkup(backKB("adm_plans")))
+	_, _ = ctx.Reply("*Step 2/5:* Enter *price* in Rs (e.g. `99`):", bot.WithParseMode("Markdown"), bot.WithReplyMarkup(backKB("adm_plans")))
 	return nil
 }
 
@@ -472,7 +454,7 @@ func AdmCreatePlanPrice(ctx *bot.Context) error {
 	}
 	price, ok := parseFloat(ctx.Text())
 	if !ok {
-		_, _ = ctx.Reply("❌ Enter a number.")
+		_, _ = ctx.Reply("Enter a number.")
 		return nil
 	}
 	AdminFSM.SetData(senderID, "plan_price", price)
@@ -488,7 +470,7 @@ func AdmCreatePlanStorage(ctx *bot.Context) error {
 	}
 	gb, ok := parseInt(ctx.Text())
 	if !ok {
-		_, _ = ctx.Reply("❌ Enter a whole number.")
+		_, _ = ctx.Reply("Enter a whole number.")
 		return nil
 	}
 	AdminFSM.SetData(senderID, "plan_storage", gb)
@@ -504,7 +486,7 @@ func AdmCreatePlanDays(ctx *bot.Context) error {
 	}
 	days, ok := parseInt(ctx.Text())
 	if !ok {
-		_, _ = ctx.Reply("❌ Enter a whole number.")
+		_, _ = ctx.Reply("Enter a whole number.")
 		return nil
 	}
 	AdminFSM.SetData(senderID, "plan_days", days)
@@ -522,7 +504,7 @@ func AdmCreatePlanDesc(ctx *bot.Context) error {
 	data := AdminFSM.Get(senderID).Data
 	if data == nil {
 		AdminFSM.End(senderID)
-		_, _ = ctx.Reply("❌ Session expired. Please start again.")
+		_, _ = ctx.Reply("Session expired. Please start again.")
 		return nil
 	}
 	planName := safeString(data["plan_name"])
@@ -537,28 +519,26 @@ func AdmCreatePlanDesc(ctx *bot.Context) error {
 	planID, err := db.CreatePlan(ctx.Context(), planName, desc, planPrice, planStorage, planDays)
 	AdminFSM.End(senderID)
 	if err != nil {
-		_, _ = ctx.Reply("❌ Failed to create plan.")
+		_, _ = ctx.Reply("Failed to create plan.")
 		return nil
 	}
 
-	text := fmt.Sprintf("✅ *Plan Created!*\n\n*ID:* %d\n*Name:* %s\n*Price:* ₹%.0f\n*Storage:* %d GB\n*Duration:* %d days", planID, planName, planPrice, planStorage, planDays)
+	text := fmt.Sprintf("*Plan Created!*\n\n*ID:* %d\n*Name:* %s\n*Price:* Rs.%.0f\n*Storage:* %d GB\n*Duration:* %d days", planID, planName, planPrice, planStorage, planDays)
 	_, _ = ctx.Reply(text, bot.WithParseMode("Markdown"), bot.WithReplyMarkup(backKB("adm_plans")))
 	return nil
 }
-
-// ─── Pending Payments ────────────────────────────────────────────────────────────
 
 func AdmPayments(ctx *bot.Context) error {
 	_ = ctx.AnswerCallback("", false)
 	payments, _ := db.GetPendingPayments(ctx.Context())
 
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf("*💳 Pending Payments (%d)*\n\n", len(payments)))
+	b.WriteString(fmt.Sprintf("*Pending Payments (%d)*\n\n", len(payments)))
 	if len(payments) == 0 {
 		b.WriteString("No pending payments.")
 	} else {
 		for _, p := range payments {
-			b.WriteString(fmt.Sprintf("• #%d | %s | %s | ₹%.0f\n", p.ID, p.FirstName, p.PlanName, p.Amount))
+			b.WriteString(fmt.Sprintf("- #%d | %s | %s | Rs.%.0f\n", p.ID, p.FirstName, p.PlanName, p.Amount))
 		}
 	}
 
@@ -566,13 +546,13 @@ func AdmPayments(ctx *bot.Context) error {
 	for _, p := range payments {
 		markup.InlineKeyboard = append(markup.InlineKeyboard,
 			[]bot.InlineKeyboardButton{
-				bot.InlineButton(fmt.Sprintf("#%d — %s", p.ID, truncate(p.FirstName, 10)),
+				bot.InlineButton(fmt.Sprintf("#%d - %s", p.ID, truncate(p.FirstName, 10)),
 					fmt.Sprintf("adm_pay_detail_%d", p.ID)),
 			})
 	}
 	markup.InlineKeyboard = append(markup.InlineKeyboard,
 		[]bot.InlineKeyboardButton{
-			bot.InlineButton("⬅️ Back", "admin_panel"),
+			bot.InlineButton("Back", "admin_panel"),
 		})
 
 	_, _ = ctx.Reply(b.String(), bot.WithParseMode("Markdown"), bot.WithReplyMarkup(markup))
@@ -583,35 +563,31 @@ func AdmPayDetail(ctx *bot.Context, paymentID int) error {
 	_ = ctx.AnswerCallback("", false)
 	payment, _ := db.GetPayment(ctx.Context(), paymentID)
 	if payment == nil {
-		_, _ = ctx.Reply("❌ Payment not found.")
+		_, _ = ctx.Reply("Payment not found.")
 		return nil
 	}
 
-	text := fmt.Sprintf("*💳 Payment #%d*\n\n*User:* %s (`%d`)\n*Plan:* %s\n*Amount:* ₹%.0f\n*Date:* %s\n\n📸 Screenshot attached above (if visible)",
+	text := fmt.Sprintf("*Payment #%d*\n\n*User:* %s (%d)\n*Plan:* %s\n*Amount:* Rs.%.0f\n*Date:* %s\n\nScreenshot attached above (if visible)",
 		paymentID, payment.FirstName, payment.UserID, payment.PlanName, payment.Amount,
 		payment.CreatedAt)
 
 	markup := bot.NewInlineKeyboard(
 		[]bot.InlineKeyboardButton{
-			bot.InlineButton("✅ Approve", fmt.Sprintf("pay_approve_%d", paymentID)),
-			bot.InlineButton("❌ Reject", fmt.Sprintf("pay_reject_%d", paymentID)),
+			bot.InlineButton("Approve", fmt.Sprintf("pay_approve_%d", paymentID)),
+			bot.InlineButton("Reject", fmt.Sprintf("pay_reject_%d", paymentID)),
 		},
 		[]bot.InlineKeyboardButton{
-			bot.InlineButton("🔄 View Screenshot", fmt.Sprintf("pay_screenshot_%d", paymentID)),
-		},
-		[]bot.InlineKeyboardButton{
-			bot.InlineButton("⬅️ Back", "adm_payments"),
+			bot.InlineButton("Back", "adm_payments"),
 		},
 	)
 
 	if payment.ScreenshotFileID != "" {
-		// Use MainBot to send photo (file_id was uploaded by main bot)
 		if instance.MainBot != nil {
 			if _, err := instance.MainBot.SendPhoto(ctx.ChatID(), payment.ScreenshotFileID, text, bot.WithPhotoCaption(text)); err != nil {
 				log.Printf("[ADMIN] MainBot photo send failed: %v", err)
-				_, _ = ctx.Reply(text+"\n\n⚠️ *Screenshot unavailable - may have expired or from different bot*", bot.WithParseMode("Markdown"), bot.WithReplyMarkup(markup))
+				_, _ = ctx.Reply(text+"\n\n*Screenshot unavailable - may have expired or from different bot*", bot.WithParseMode("Markdown"), bot.WithReplyMarkup(markup))
 			} else {
-				_, _ = ctx.Reply("✅ *Approve* or ❌ *Reject* below:", bot.WithParseMode("Markdown"), bot.WithReplyMarkup(markup))
+				_, _ = ctx.Reply("*Approve* or *Reject* below:", bot.WithParseMode("Markdown"), bot.WithReplyMarkup(markup))
 			}
 		} else {
 			_, _ = ctx.Reply(text, bot.WithParseMode("Markdown"), bot.WithReplyMarkup(markup))
@@ -625,45 +601,43 @@ func AdmPayDetail(ctx *bot.Context, paymentID int) error {
 func AdmPayApprove(ctx *bot.Context, paymentID int) error {
 	_ = ctx.AnswerCallback("", false)
 	_ = db.ApprovePayment(ctx.Context(), paymentID)
-	_, _ = ctx.Reply(fmt.Sprintf("✅ Payment #%d approved.", paymentID), bot.WithParseMode("Markdown"))
+	_, _ = ctx.Reply(fmt.Sprintf("Payment #%d approved.", paymentID), bot.WithParseMode("Markdown"))
 	return AdmPayments(ctx)
 }
 
 func AdmPayReject(ctx *bot.Context, paymentID int) error {
 	_ = ctx.AnswerCallback("", false)
 	_ = db.RejectPayment(ctx.Context(), paymentID)
-	_, _ = ctx.Reply(fmt.Sprintf("❌ Payment #%d rejected.", paymentID), bot.WithParseMode("Markdown"))
+	_, _ = ctx.Reply(fmt.Sprintf("Payment #%d rejected.", paymentID), bot.WithParseMode("Markdown"))
 	return AdmPayments(ctx)
 }
-
-// ─── Gift Codes ─────────────────────────────────────────────────────────────────
 
 func AdmGifts(ctx *bot.Context) error {
 	_ = ctx.AnswerCallback("", false)
 	codes, _ := db.GetAllGiftCodes(ctx.Context())
 
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf("*🎁 Gift Codes (%d)*\n\n", len(codes)))
+	b.WriteString(fmt.Sprintf("*Gift Codes (%d)*\n\n", len(codes)))
 	if len(codes) == 0 {
 		b.WriteString("No gift codes yet.")
 	} else {
 		for _, c := range codes {
-			status := "Available ⏳"
+			status := "Available"
 			if c.IsFullyClaimed() {
-				status = fmt.Sprintf("Used %d/%d ✅", c.ClaimCount, c.MaxClaims)
+				status = fmt.Sprintf("Used %d/%d", c.ClaimCount, c.MaxClaims)
 			} else if c.IsExpired() {
-				status = "Expired ⏰"
+				status = "Expired"
 			}
-			b.WriteString(fmt.Sprintf("• `%s` — %d GB — %s\n", c.Code, c.StorageGB, status))
+			b.WriteString(fmt.Sprintf("- `%s` - %d GB - %s\n", c.Code, c.StorageGB, status))
 		}
 	}
 
 	markup := bot.NewInlineKeyboard(
 		[]bot.InlineKeyboardButton{
-			bot.InlineButton("➕ Create Gift Code", "adm_create_gift"),
+			bot.InlineButton("Create Gift Code", "adm_create_gift"),
 		},
 		[]bot.InlineKeyboardButton{
-			bot.InlineButton("⬅️ Back", "admin_panel"),
+			bot.InlineButton("Back", "admin_panel"),
 		},
 	)
 
@@ -674,7 +648,7 @@ func AdmGifts(ctx *bot.Context) error {
 func AdmCreateGiftPrompt(ctx *bot.Context) error {
 	_ = ctx.AnswerCallback("", false)
 	AdminFSM.SetState(ctx.SenderID(), StateCreateGift)
-	_, _ = ctx.Reply("*🎁 Create Gift Code*\n\n*Step 1/3:* Enter GB amount (e.g. `10`):", bot.WithParseMode("Markdown"), bot.WithReplyMarkup(backKB("adm_gifts")))
+	_, _ = ctx.Reply("*Create Gift Code*\n\n*Step 1/3:* Enter GB amount (e.g. `10`):", bot.WithParseMode("Markdown"), bot.WithReplyMarkup(backKB("adm_gifts")))
 	return nil
 }
 
@@ -685,12 +659,12 @@ func AdmCreateGiftDo(ctx *bot.Context) error {
 	}
 	gb, ok := parseInt(ctx.Text())
 	if !ok {
-		_, _ = ctx.Reply("❌ Send a number (GB).")
+		_, _ = ctx.Reply("Send a number (GB).")
 		return nil
 	}
 	AdminFSM.SetData(senderID, "storage_gb", int64(gb))
 	AdminFSM.SetState(senderID, StateCreateGiftExpiry)
-	_, _ = ctx.Reply(fmt.Sprintf("*🎁 Gift Code*\n\nStep 1/3: Storage set to *%d GB*\n*Step 2/3:* Enter expiry in days (`0` for permanent):", gb), bot.WithParseMode("Markdown"), bot.WithReplyMarkup(backKB("adm_gifts")))
+	_, _ = ctx.Reply(fmt.Sprintf("*Gift Code*\n\nStep 1/3: Storage set to *%d GB*\n*Step 2/3:* Enter expiry in days (`0` for permanent):", gb), bot.WithParseMode("Markdown"), bot.WithReplyMarkup(backKB("adm_gifts")))
 	return nil
 }
 
@@ -701,7 +675,7 @@ func AdmCreateGiftExpiry(ctx *bot.Context) error {
 	}
 	days, ok := parseInt(ctx.Text())
 	if !ok {
-		_, _ = ctx.Reply("❌ Enter a number for days.")
+		_, _ = ctx.Reply("Enter a number for days.")
 		return nil
 	}
 	AdminFSM.SetData(senderID, "expiry_days", int64(days))
@@ -710,7 +684,7 @@ func AdmCreateGiftExpiry(ctx *bot.Context) error {
 	if days > 0 {
 		expiryText = fmt.Sprintf("%d days", days)
 	}
-	_, _ = ctx.Reply(fmt.Sprintf("*🎁 Gift Code*\n*Step 3/3:* Enter max claims (default `1`):\n_(Expiry set to %s)_", expiryText), bot.WithParseMode("Markdown"), bot.WithReplyMarkup(backKB("adm_gifts")))
+	_, _ = ctx.Reply(fmt.Sprintf("*Gift Code*\n*Step 3/3:* Enter max claims (default `1`):\n_(Expiry set to %s)_", expiryText), bot.WithParseMode("Markdown"), bot.WithReplyMarkup(backKB("adm_gifts")))
 	return nil
 }
 
@@ -723,7 +697,7 @@ func AdmCreateGiftClaims(ctx *bot.Context) error {
 	data := AdminFSM.Get(senderID).Data
 	if data == nil {
 		AdminFSM.End(senderID)
-		_, _ = ctx.Reply("❌ Session expired. Please start again.", bot.WithParseMode("Markdown"))
+		_, _ = ctx.Reply("Session expired. Please start again.", bot.WithParseMode("Markdown"))
 		return nil
 	}
 
@@ -735,7 +709,7 @@ func AdmCreateGiftClaims(ctx *bot.Context) error {
 	gbVal, ok := data["storage_gb"]
 	if !ok {
 		AdminFSM.End(senderID)
-		_, _ = ctx.Reply("❌ Session expired. Please start again.", bot.WithParseMode("Markdown"))
+		_, _ = ctx.Reply("Session expired. Please start again.", bot.WithParseMode("Markdown"))
 		return nil
 	}
 	gb := int(gbVal.(int64))
@@ -755,7 +729,7 @@ func AdmCreateGiftClaims(ctx *bot.Context) error {
 	gift, err := db.CreateGiftCode(ctx.Context(), code, gb, maxClaims, senderID, expiresAt)
 	AdminFSM.End(senderID)
 	if err != nil {
-		_, _ = ctx.Reply("❌ Failed to create gift code.")
+		_, _ = ctx.Reply("Failed to create gift code.")
 		return nil
 	}
 
@@ -764,17 +738,15 @@ func AdmCreateGiftClaims(ctx *bot.Context) error {
 		expiryText = expiresAt.Format("2006-01-02")
 	}
 
-	text := fmt.Sprintf("✅ *Gift Code Created!* 🎁\n\n`%s`\n💾 Storage: %d GB\n⏰ Expiry: %s\n👥 Max Claims: %d", code, gift.StorageGB, expiryText, gift.MaxClaims)
+	text := fmt.Sprintf("*Gift Code Created!*\n\n`%s`\nStorage: %d GB\nExpiry: %s\nMax Claims: %d", code, gift.StorageGB, expiryText, gift.MaxClaims)
 	_, _ = ctx.Reply(text, bot.WithParseMode("Markdown"), bot.WithReplyMarkup(backKB("adm_gifts")))
 	return nil
 }
 
-// ─── Broadcast ────────────────────────────────────────────────────────────────────
-
 func AdmBroadcastPrompt(ctx *bot.Context) error {
 	_ = ctx.AnswerCallback("", false)
 	AdminFSM.SetState(ctx.SenderID(), StateBroadcast)
-	_, _ = ctx.Reply("*📢 Broadcast*\n\nSend the message to broadcast to ALL users:\n_(Supports Markdown formatting)_", bot.WithParseMode("Markdown"), bot.WithReplyMarkup(cancelKB()))
+	_, _ = ctx.Reply("*Broadcast*\n\nSend the message to broadcast to ALL users:\n_(Supports Markdown formatting)_", bot.WithParseMode("Markdown"), bot.WithReplyMarkup(cancelKB()))
 	return nil
 }
 
@@ -794,7 +766,6 @@ func AdmBroadcastSend(ctx *bot.Context) error {
 	total := len(users)
 	adminChatID := ctx.ChatID()
 
-	// Run broadcast in goroutine so we don't block
 	go func() {
 		sent := 0
 		failed := 0
@@ -809,36 +780,29 @@ func AdmBroadcastSend(ctx *bot.Context) error {
 			} else {
 				sent++
 			}
-			// Rate limit: sleep every 30 messages (1 second per 30 users ≈ 33 users/sec max)
 			if (i+1)%30 == 0 {
 				time.Sleep(1 * time.Second)
 			}
 		}
 
-		report := fmt.Sprintf("✅ *Broadcast Complete!* 📣\n\n*Sent:* %d\n*Failed:* %d\n*Total:* %d", sent, failed, total)
+		report := fmt.Sprintf("*Broadcast Complete!*\n\n*Sent:* %d\n*Failed:* %d\n*Total:* %d", sent, failed, total)
 		if instance.AdminBot != nil {
-			_, _ = instance.AdminBot.SendMessage(adminChatID, report, bot.WithParseMode("Markdown"))
+			_, _ = instance.MainBot.SendMessage(adminChatID, report, bot.WithParseMode("Markdown"))
 		}
 		log.Printf("Broadcast done. Sent: %d, Failed: %d, Total: %d", sent, failed, total)
 	}()
 
-	// Acknowledge immediately
-	_, _ = ctx.Reply(fmt.Sprintf("📣 Broadcasting to %d users in background...\nYou'll be notified when done.", total), bot.WithParseMode("Markdown"))
+	_, _ = ctx.Reply(fmt.Sprintf("Broadcasting to %d users in background...\nYou'll be notified when done.", total), bot.WithParseMode("Markdown"))
 	return nil
 }
-
-// ─── Cleanup ────────────────────────────────────────────────────────────────────────
 
 func AdmCleanup(ctx *bot.Context) error {
 	_ = ctx.AnswerCallback("Running cleanup...", false)
 	count, _ := db.DeleteExpiredFiles(ctx.Context())
-	_, _ = ctx.Reply(fmt.Sprintf("✅ *Cleanup Complete!* 🧹\n\nDeleted *%d* expired files.", count), bot.WithParseMode("Markdown"))
+	_, _ = ctx.Reply(fmt.Sprintf("*Cleanup Complete!*\n\nDeleted *%d* expired files.", count), bot.WithParseMode("Markdown"))
 	return nil
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-// showUserDetail builds and sends the user detail message.
 func showUserDetail(ctx *bot.Context, user *models.User) error {
 	uname := "N/A"
 	if user.Username != nil {
@@ -850,28 +814,28 @@ func showUserDetail(ctx *bot.Context, user *models.User) error {
 	}
 	limitStr := fmt.Sprintf("%d GB", user.StorageLimitGB)
 	if user.StorageLimitGB == -1 {
-		limitStr = "∞ Unlimited"
+		limitStr = "Unlimited"
 	}
 	storageUsed := utils.FormatBytes(user.StorageUsedBytes)
 	percent := user.StoragePercentUsed()
 	refCount, _ := db.GetReferralCount(ctx.Context(), user.ID)
 	fileCount, _ := db.GetUserFilesCount(ctx.Context(), user.ID)
 
-	text := fmt.Sprintf("*👤 User Details*\n\n*ID:* `%d` 🆔\n*Name:* %s 👤\n*Username:* %s 🔖\n*Joined:* %s 📅\n*Banned:* %s 🚫\n\n*Storage:* %s / %s *(%.1f%%)* 💾\n*Files:* %d 📁\n*Referrals:* %d 👥",
+	text := fmt.Sprintf("*User Details*\n\n*ID:* %d\n*Name:* %s\n*Username:* %s\n*Joined:* %s\n*Banned:* %s\n\n*Storage:* %s / %s *(%.1f%%)*\n*Files:* %d\n*Referrals:* %d",
 		user.ID, displayName, uname, user.CreatedAt.Format("2006-01-02"),
-		boolEmoji(user.IsBanned), storageUsed, limitStr, percent, fileCount, refCount)
+		yesNo(user.IsBanned), storageUsed, limitStr, percent, fileCount, refCount)
 
 	markup := bot.NewInlineKeyboard(
 		[]bot.InlineKeyboardButton{
-			bot.InlineButton("🚫 Ban", fmt.Sprintf("adm_ban_do_%d", user.ID)),
-			bot.InlineButton("✅ Unban", fmt.Sprintf("adm_unban_do_%d", user.ID)),
+			bot.InlineButton("Ban", fmt.Sprintf("adm_ban_do_%d", user.ID)),
+			bot.InlineButton("Unban", fmt.Sprintf("adm_unban_do_%d", user.ID)),
 		},
 		[]bot.InlineKeyboardButton{
-			bot.InlineButton("💾 Set Storage", fmt.Sprintf("adm_setstg_%d", user.ID)),
-			bot.InlineButton("🎁 Add Bonus", fmt.Sprintf("adm_addbonus_%d", user.ID)),
+			bot.InlineButton("Set Storage", fmt.Sprintf("adm_setstg_%d", user.ID)),
+			bot.InlineButton("Add Bonus", fmt.Sprintf("adm_addbonus_%d", user.ID)),
 		},
 		[]bot.InlineKeyboardButton{
-			bot.InlineButton("⬅️ Back", "admin_panel"),
+			bot.InlineButton("Back", "admin_panel"),
 		},
 	)
 
@@ -918,9 +882,9 @@ func safeString(v interface{}) string {
 	return s
 }
 
-func boolEmoji(b bool) string {
+func yesNo(b bool) string {
 	if b {
-		return "Yes 🚫"
+		return "Yes"
 	}
 	return "No"
 }
@@ -929,13 +893,13 @@ func truncate(s string, max int) string {
 	if len(s) <= max {
 		return s
 	}
-	return s[:max] + "…"
+	return s[:max] + "..."
 }
 
 func backKB(callback string) *bot.InlineKeyboardMarkup {
 	return bot.NewInlineKeyboard(
 		[]bot.InlineKeyboardButton{
-			bot.InlineButton("⬅️ Back", callback),
+			bot.InlineButton("Back", callback),
 		},
 	)
 }
@@ -943,8 +907,7 @@ func backKB(callback string) *bot.InlineKeyboardMarkup {
 func cancelKB() *bot.InlineKeyboardMarkup {
 	return bot.NewInlineKeyboard(
 		[]bot.InlineKeyboardButton{
-			bot.InlineButton("❌ Cancel", "admin_panel"),
+			bot.InlineButton("Cancel", "admin_panel"),
 		},
 	)
 }
-

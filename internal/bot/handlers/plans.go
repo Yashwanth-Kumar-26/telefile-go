@@ -23,17 +23,21 @@ func ShowPlans(ctx *bot.Context) error {
 
 	subs, err := db.GetAllSubscriptions(context.Background())
 	if err != nil {
-		_, _ = ctx.Reply("❌ Failed to load plans.")
+		_, _ = ctx.Reply("Failed to load plans.")
 		return nil
 	}
 
-	text := "📦 *TeleFile Plans*\n\n"
+	text := "TeleFile Plans 💎\n\n"
 	text += "Choose a plan that fits your needs:\n\n"
 
+	hasPaidPlans := false
+
 	for _, sub := range subs {
-		price := fmt.Sprintf("₹%.0f", sub.PriceINR)
+		price := fmt.Sprintf("Rs.%.0f", sub.PriceINR)
 		if sub.PriceINR == 0 {
 			price = "Free"
+		} else {
+			hasPaidPlans = true
 		}
 
 		storage := "Unlimited"
@@ -52,12 +56,12 @@ func ShowPlans(ctx *bot.Context) error {
 
 		durationText := ""
 		if features.DurationDays > 0 {
-			durationText = fmt.Sprintf(" • %d days", features.DurationDays)
+			durationText = fmt.Sprintf(" - %d days", features.DurationDays)
 		}
 
-		text += fmt.Sprintf("🌟 *%s*\n", sub.Name)
-		text += fmt.Sprintf("💰 *%s*/month%s\n", price, durationText)
-		text += fmt.Sprintf("💾 %s storage\n", storage)
+		text += fmt.Sprintf("*%s*\n", sub.Name)
+		text += fmt.Sprintf("Price: *%s*/month%s\n", price, durationText)
+		text += fmt.Sprintf("Storage: %s\n", storage)
 
 		if features.Description != "" {
 			text += fmt.Sprintf("\n_%s_\n", features.Description)
@@ -65,20 +69,20 @@ func ShowPlans(ctx *bot.Context) error {
 
 		featList := []string{}
 		if features.AdFree {
-			featList = append(featList, "✓ Ad-free")
+			featList = append(featList, "- Ad-free")
 		}
 		if features.PrioritySupport {
-			featList = append(featList, "✓ Priority Support")
+			featList = append(featList, "- Priority Support")
 		}
 		if features.BatchFiles != 0 {
 			if features.BatchFiles == -1 {
-				featList = append(featList, "✓ Unlimited batches")
+				featList = append(featList, "- Unlimited batches")
 			} else {
-				featList = append(featList, fmt.Sprintf("✓ %d batch files", features.BatchFiles))
+				featList = append(featList, fmt.Sprintf("- %d batch files", features.BatchFiles))
 			}
 		}
 		if features.MaxFileSize > 2048 {
-			featList = append(featList, fmt.Sprintf("✓ %d MB max file", features.MaxFileSize))
+			featList = append(featList, fmt.Sprintf("- %d MB max file", features.MaxFileSize))
 		}
 
 		for _, f := range featList {
@@ -87,28 +91,20 @@ func ShowPlans(ctx *bot.Context) error {
 		text += "\n"
 	}
 
-	hasPaidPlans := false
-	for _, sub := range subs {
-		if sub.PriceINR > 0 {
-			hasPaidPlans = true
-			break
-		}
-	}
-
 	var markup *bot.InlineKeyboardMarkup
 	if hasPaidPlans {
 		markup = bot.NewInlineKeyboard(
 			[]bot.InlineKeyboardButton{
-				bot.InlineButton("💳 Buy Plan", "buy_plan"),
+				bot.InlineButton("Buy Plan", "buy_plan"),
 			},
 			[]bot.InlineKeyboardButton{
-				bot.InlineButton("🏠 Main Menu", "start"),
+				bot.InlineButton("Main Menu", "start"),
 			},
 		)
 	} else {
 		markup = bot.NewInlineKeyboard(
 			[]bot.InlineKeyboardButton{
-				bot.InlineButton("🏠 Main Menu", "start"),
+				bot.InlineButton("Main Menu", "start"),
 			},
 		)
 	}

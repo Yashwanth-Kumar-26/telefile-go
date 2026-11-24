@@ -21,7 +21,7 @@ func AdminOnly(cfg *config.Config) func(bot.Handler) bot.Handler {
 				}
 			}
 
-			_, _ = ctx.Reply("\xe2\x9b\x94 Access denied. Admin only.")
+			_, _ = ctx.Reply("Access denied. Admin only.")
 			return nil
 		}
 	}
